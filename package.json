@@ -1,0 +1,35 @@
+{
+  "name": "reelz_server",
+  "version": "1.0.0",
+  "description": "Server for the Reelz App",
+  "keywords": [
+    "Reelz",
+    "Short Videos",
+    "Social Media"
+  ],
+  "license": "ISC",
+  "author": "Viraj Doshi",
+  "type": "module",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.775.0",
+    "@aws-sdk/s3-request-presigner": "^3.775.0",
+    "aws-sdk": "^2.1692.0",
+    "bcryptjs": "^3.0.2",
+    "body-parser": "^1.20.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "ejs": "^3.1.10",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.2",
+    "pg": "^8.14.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.11"
+  }
+}

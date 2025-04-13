@@ -1,6 +1,7 @@
 import 'dotenv/config.js';
 import jwt from 'jsonwebtoken';
 
+//the req.user has the userId and username
 export default function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const jwtToken = authHeader && authHeader.split(' ')[1];

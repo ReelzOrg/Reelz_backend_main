@@ -2,7 +2,7 @@ import 'dotenv/config.js';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 
-import { query } from '../../utils/connectDB.js';
+import { createUserWithDriver, query } from '../../utils/connectDB.js';
 import { verifyEmail } from '../../utils.js';
 
 export async function loginUser(req, res) {
@@ -21,7 +21,7 @@ export async function loginUser(req, res) {
       } else if(result) {
         const userData = {_id: user[0]._id}
         console.log('Passwords match! User authenticated.', result);
-        const token = jwt.sign({ userId: user[0]._id }, process.env.JWT_SECRET);
+        const token = jwt.sign({ userId: user[0]._id, username: user[0].username }, process.env.JWT_SECRET);
         // const authHeader = new Headers();
         // authHeader.append('Authorization', `Bearer ${token}`)
         
@@ -39,11 +39,6 @@ export async function loginUser(req, res) {
     res.json({ success: false, message: `No user with email ${email} exist` })
   }
 }
-
-// const upload = multer({
-//   storage: multer.memoryStorage(),
-//   limits: { fileSize: 5*1024*1024 } //5MB limit
-// })
 
 export async function registerUser(req, res) {
   //look for the user in the database.
@@ -66,6 +61,7 @@ export async function registerUser(req, res) {
   const salt = await bcrypt.genSalt(10);
   const password_hash = await bcrypt.hash(req.body.password, salt);
 
+  //save the user to the database
   const insertQuery = `
   INSERT INTO users (username, email, password_hash, first_name, last_name, profile_picture)
   VALUES ($1, $2, $3, $4, $5, $6)
@@ -74,10 +70,15 @@ export async function registerUser(req, res) {
   const savedUser = await query(insertQuery, values, "insertUser");
   console.log(savedUser);
 
+  //also create a node in the NEO4J database
+  const neo4jUser = await createUserWithDriver(req.body.username, savedUser[0]._id);
+  console.log("This is the neo4j user", neo4jUser);
+
+  //creating a user in postgresql is more important
   if(savedUser) {
     console.log("user have been saved!");
     const userData = {_id: savedUser[0]._id}
-    const token = jwt.sign({ userId: savedUser[0]._id }, process.env.JWT_SECRET)
+    const token = jwt.sign({ userId: savedUser[0]._id, username: savedUser[0].username }, process.env.JWT_SECRET)
     res.json({ success: true, token: token, user: userData })
   } else {
     res.json({ success: false, message: "The user was not saved to the database" })

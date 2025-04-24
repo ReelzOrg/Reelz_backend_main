@@ -1,15 +1,14 @@
 import 'dotenv/config.js'
 import express from 'express';
-
 import bodyParser from 'body-parser';
 import cors from 'cors';
 
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import { query, closePool } from './utils/connectDB.js';
 
-import { authRouter, uploadRouter, userDataRouter } from './api/routes/index.js';
+import { query, closePool } from './utils/connectDB.js';
+import { authRouter, userDataRouter } from './api/routes/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -25,7 +24,6 @@ app.set('views', path.join(__dirname, 'views')); // Set the views directory
 app.use(bodyParser.urlencoded({extended: true}));
 
 app.use("/api/auth", authRouter);
-app.use("/api/upload", uploadRouter);
 app.use("/api/user", userDataRouter);
 
 app.get("/", async (req, res) => {

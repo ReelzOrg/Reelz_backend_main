@@ -21,7 +21,7 @@ export async function loginUser(req, res) {
       } else if(result) {
         const userData = {_id: user[0]._id}
         console.log('Passwords match! User authenticated.', result);
-        const token = jwt.sign({ userId: user[0]._id, username: user[0].username }, process.env.JWT_SECRET);
+        const token = jwt.sign({ userId: user[0]._id }, process.env.JWT_SECRET);
         // const authHeader = new Headers();
         // authHeader.append('Authorization', `Bearer ${token}`)
         
@@ -78,7 +78,7 @@ export async function registerUser(req, res) {
   if(savedUser) {
     console.log("user have been saved!");
     const userData = {_id: savedUser[0]._id}
-    const token = jwt.sign({ userId: savedUser[0]._id, username: savedUser[0].username }, process.env.JWT_SECRET)
+    const token = jwt.sign({ userId: savedUser[0]._id }, process.env.JWT_SECRET)
     res.json({ success: true, token: token, user: userData })
   } else {
     res.json({ success: false, message: "The user was not saved to the database" })

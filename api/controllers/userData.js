@@ -1,24 +1,14 @@
 import { driver, neo4jQuery, ogm, query } from '../../utils/connectDB.js';
 
-async function isFollowing(userId) {
-  const session = driver.session();
-  const User = ogm.model("User");
-
-  const [result] = await User.find({
-    where: {
-      _id: userId
-    }
-  })
-} 
-
 export async function getUserProfile(req, res) {
   //req.user is the user that is logged in
-  const username = req.params.username;
-  const userProfileQuery = `SELECT * FROM users WHERE username = $1 LIMIT 1;`;
-  const requestedUser = await query(userProfileQuery, [username], "getUserByUsername");
+  const reqUserid = req.params.id;
+  const userProfileQuery = `SELECT * FROM users WHERE _id = $1 LIMIT 1;`;
+  const requestedUser = await query(userProfileQuery, [reqUserid], "getUserById");
 
   if(requestedUser) {
     let userData = {
+      _id: requestedUser[0]._id,
       username: requestedUser[0].username,
       first_name: requestedUser[0].first_name,
       last_name: requestedUser[0].last_name,
@@ -54,33 +44,57 @@ export async function getUserProfile(req, res) {
   }
 }
 
-//cmon store both id and username in jwt token to avoid the first postgres query
 export async function handleFollow(req, res) {
-  const username = req.params.username;
-  const userFollowQuery = `SELECT _id FROM users WHERE username = $1 LIMIT 1;`;
-  const requestedUser = await query(userFollowQuery, [username], "userFollowQuery");
-
+  const reqUserId = req.params.id;
   //create a FOLLOWS relationship in neo4j
-  const createFollowQuery = `MATCH (follower:User {_id: $loggedInUser}), (following:User {_id: $requestedUser}) CREATE (follower)-[:FOLLOWS]->(following) RETURN follower, following;`;
-  const records = await neo4jQuery(createFollowQuery, {loggedInUser: req.user.userId, requestedUser: requestedUser[0]._id}, "createFollowRelationship");
+  // const createFollowQuery = `MATCH (follower:User {_id: $loggedInUser}), (following:User {_id: $requestedUser}) CREATE (follower)-[:FOLLOWS]->(following) RETURN follower, following;`;
+  // const records = await neo4jQuery(createFollowQuery, {loggedInUser: req.user.userId, requestedUser: requestedUser[0]._id}, "createFollowRelationship");
+  // console.log(records);
+  const createFollowQuery = `MATCH (follower:User {_id: $loggedInUser}), (following:User {_id: $requestedUser}) MERGE (follower)-[:FOLLOWS]->(following) RETURN follower, following;`;
+  const records = await neo4jQuery(createFollowQuery, {loggedInUser: req.user.userId, requestedUser: reqUserId}, "createFollowRelationship");
   console.log(records);
 
   //update the follower and following count in postgresql
   const incrementFollowerCountQuery = `UPDATE users SET follower_count = CASE WHEN _id = $2 THEN follower_count + 1 ELSE follower_count END, following_count = CASE WHEN _id = $1 THEN following_count + 1 ELSE following_count END WHERE _id IN ($1, $2);`;
-  const values = [req.user.userId, requestedUser[0]._id];
+  const values = [req.user.userId, reqUserId];
   const result = await query(incrementFollowerCountQuery, values, "incrementFollower&FollowingCount");
   console.log("The counts have been incremented", result);
 
-  res.json({ success: true, message: "updated relationships and incrememnt follow counts on both accounts" })
+  res.json({ success: true, message: "updated relationships and incrememnted follow counts on both accounts" })
 }
 
 export async function getUserById(req, res) {
   const getUserByIdQuery = `SELECT * FROM users WHERE _id = $1 LIMIT 1;`;
   const user = await query(getUserByIdQuery, [req.user.userId], "getuserById");
 
-  console.log("We got the user");
+  //get all users posts (limit 9)
+  const getUserPostsQuery = `
+  SELECT 
+    p.*,
+    (
+      SELECT JSON_AGG(
+        JSON_BUILD_OBJECT(
+          '_id', m._id,
+          'media_url', m.media_url,
+          'media_type', m.media_type,
+          'position', m.position,
+          'updated_at', m.updated_at
+        )
+      )
+      FROM media m
+      WHERE m.post_id = p._id
+    ) AS media_items
+  FROM posts p
+  WHERE p.user_id = $1
+  LIMIT 9;`;
+  const postData = await query(getUserPostsQuery, [req.user.userId], "getUserPosts");
+
+  //get the media from the post
+  // const getMediaQuery = `SELECT * FROM media WHERE post_id = $1;`;
+  // const media = await query(getMediaQuery, [postMetaData[0]._id], "getMedia");
 
   const userData = {
+    _id: user[0]._id,
     username: user[0].username,
     first_name: user[0].first_name,
     last_name: user[0].last_name,
@@ -91,5 +105,84 @@ export async function getUserById(req, res) {
     is_private: user[0].is_private,
     bio: user[0].bio
   }
-  res.json({ success: true, user: userData });
+
+  console.log("These is the post data:", postData);
+
+  res.json({ success: true, user: userData, posts: postData });
 }
+
+//  /:id/followers
+export async function getFollowers(req, res) {
+  const reqUserId = req.params.id;
+  console.log("The user id is", reqUserId);
+  const getUserByIdQuery = `SELECT is_private FROM users WHERE _id = $1 LIMIT 1;`;
+  const userisPrivate = await query(getUserByIdQuery, [reqUserId], "getuserById");
+
+  //get the id from the jwt token
+  //compare this token of the loggedin user with the id in the request
+  //if they are different then check if the loggedin user is following the account
+  //and then return the followers list
+  let isFollowing = false;
+  console.log("The user is private", userisPrivate, reqUserId);
+  if(reqUserId == req.user.userId || !userisPrivate[0].is_private) {
+    isFollowing = true;
+  } else if(reqUserId != req.user.userId && userisPrivate[0].is_private) {
+    const checkFollowQuery = `MATCH (follower:User {_id: $loggedInUser})-[r:FOLLOWS]->(following:User {_id: $requestedUser}) RETURN COUNT(r) > 0 AS isFollowing;`;
+    const result = await neo4jQuery(checkFollowQuery, {loggedInUser: req.user.userId, requestedUser: reqUserId}, "checkFollow");
+    isFollowing = result[0].get("isFollowing");
+  }
+
+  //look at this query. see if it works (specially the ORDER BY clause)
+  if(isFollowing) {
+    const getFollowersListQuery = `MATCH (user:User {_id: $userId})<-[:FOLLOWS]-(follower:User)
+      WITH COUNT(follower) as count, COLLECT(follower) as followers 
+      WHERE count > 0 
+      RETURN followers
+      ORDER BY follower._id
+      SKIP $offset
+      LIMIT $limit;`;
+    const followers = await neo4jQuery(getFollowersListQuery, {userId: reqUserId, offset: 0, limit: 50}, "getFollowersList");
+    return res.json({ success: true, followers: followers.length > 0 ? followers[0].get("followers") : null });
+  }
+
+  return res.json({ success: false, message: "You are not following this account" })
+}
+
+export async function getFollowing(req, res) {
+  const username = req.params.username;
+  const getFollowingsListQuery = `MATCH (user:User {_id: $userId})-[:FOLLOWS]->(following:User) RETURN following;`;
+  const following = await neo4jQuery(getFollowingsListQuery, {userId: req.user.userId}, "getFollowingsList");
+
+  res.json({ success: true, following: following });
+}
+
+// /:id/edit-profile
+export async function editProfile(req, res) {
+  //TODO: Complete this
+}
+
+// /:id/post
+export async function handlePostUpload(req, res) {
+  //upload the post to the database
+
+  //jwt token id
+  const loggedInUserId = req.user.userId;
+  //url id
+  const apiId = req.params.id;
+
+  if(loggedInUserId != apiId) {
+    return res.json({ success: false, message: "You are not authorized to upload a post on this account" })
+  }
+
+  //get the post id from this query
+  const postUploadQuery = `INSERT INTO posts (user_id, caption) VALUES ($1, $2) RETURNING *;`;
+  const post = await query(postUploadQuery, [loggedInUserId, req.body.caption], "postUpload");
+
+  const mediaUrlQuery = `INSERT INTO media (post_id, media_url, media_type, position) VALUES ($1, $2, $3, $4) RETURNING *;`;
+  const media = await query(mediaUrlQuery, [post[0]._id, req.body.mediaUrl, req.body.mediaType, 1], "mediaUpload");
+
+  res.json({ success: true, message: "Post uploaded successfully" })
+}
+//d29e763b-58b2-4f58-962e-6b3d1f3c94e7
+//https://reelzapp.s3.us-east-1.amazonaws.com/userPosts/post_1000000040
+//image/jpeg, 1

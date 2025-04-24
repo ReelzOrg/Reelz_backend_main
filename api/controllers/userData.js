@@ -161,7 +161,7 @@ export async function editProfile(req, res) {
   //TODO: Complete this
 }
 
-// /:id/post
+// /:id/post/create
 export async function handlePostUpload(req, res) {
   //upload the post to the database
 
@@ -175,14 +175,27 @@ export async function handlePostUpload(req, res) {
   }
 
   //get the post id from this query
-  const postUploadQuery = `INSERT INTO posts (user_id, caption) VALUES ($1, $2) RETURNING *;`;
-  const post = await query(postUploadQuery, [loggedInUserId, req.body.caption], "postUpload");
+  const postQuery = `
+      WITH new_post AS (
+        INSERT INTO posts (user_id, caption) 
+        VALUES ($1, $2)
+        RETURNING _id
+      ),
+      update_user AS (
+        UPDATE users 
+        SET post_count = post_count + 1 
+        WHERE _id = $1
+      )
+      INSERT INTO media (post_id, media_url, media_type, position)
+      SELECT _id, $3, $4, 1 FROM new_post
+      RETURNING *;
+    `;
+    //, (SELECT _id FROM new_post) AS post_id
+  const post = await query(postQuery, [loggedInUserId, req.body.caption, req.body.mediaUrl, req.body.mediaType], "createPost");
 
-  const mediaUrlQuery = `INSERT INTO media (post_id, media_url, media_type, position) VALUES ($1, $2, $3, $4) RETURNING *;`;
-  const media = await query(mediaUrlQuery, [post[0]._id, req.body.mediaUrl, req.body.mediaType, 1], "mediaUpload");
+  //create the node for the post in neo4j and create a relationship from the user to the post
+  const createPostQuery = `MATCH (user:User {_id: $userId}) CREATE (post:Post {_id: $postId}) CREATE (user)-[:POSTED]->(post) RETURN post;`;
+  const neo4jPost = await neo4jQuery(createPostQuery, {userId: loggedInUserId, postId: post[0].post_id}, "createPost");
 
-  res.json({ success: true, message: "Post uploaded successfully" })
+  res.json({ success: true, message: "Post uploaded successfully", post: post[0] })
 }
-//d29e763b-58b2-4f58-962e-6b3d1f3c94e7
-//https://reelzapp.s3.us-east-1.amazonaws.com/userPosts/post_1000000040
-//image/jpeg, 1

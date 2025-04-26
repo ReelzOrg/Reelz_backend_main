@@ -2,9 +2,9 @@ import { driver, neo4jQuery, ogm, query } from '../../utils/connectDB.js';
 
 export async function getUserProfile(req, res) {
   //req.user is the user that is logged in
-  const reqUserid = req.params.id;
-  const userProfileQuery = `SELECT * FROM users WHERE _id = $1 LIMIT 1;`;
-  const requestedUser = await query(userProfileQuery, [reqUserid], "getUserById");
+  const reqUserUsername = req.params.username;
+  const userProfileQuery = `SELECT * FROM users WHERE username = $1 LIMIT 1;`;
+  const requestedUser = await query(userProfileQuery, [reqUserUsername], "getUserByUsername");
 
   if(requestedUser) {
     let userData = {
@@ -27,32 +27,42 @@ export async function getUserProfile(req, res) {
     }
 
     //check if the user is following the account
-    //request the neo4j database
-    const checkFollowQuery = `MATCH (follower:User {_id: $loggedInUser})-[r:FOLLOWS]->(following:User {_id: $requestedUser}) RETURN COUNT(r) > 0 AS isFollowing;`;
-    const result = await neo4jQuery(checkFollowQuery, {loggedInUser: req.user.userId, requestedUser: requestedUser[0]._id}, "checkFollow");
-    const isFollowing = result[0].get("isFollowing");
+    // const checkFollowQuery = `MATCH (follower:User {_id: $loggedInUser})-[r:FOLLOWS]->(following:User {_id: $requestedUser}) RETURN COUNT(r) > 0 AS isFollowing;`;
+    const checkFollowStatusQuery = `MATCH (follower:User {_id: $loggedInUser})-[r:FOLLOWS|REQUESTED]->(following:User {_id: $requestedUser}) RETURN EXISTS(r) AS relationshipExists, type(r) AS followStatus`
+    const result = await neo4jQuery(checkFollowStatusQuery, {loggedInUser: req.user.userId, requestedUser: requestedUser[0]._id}, "checkFollow");
+    let followStatus;
+    if(result && result.length === 0) {followStatus = "none"}
+    else followStatus = result[0].get("followStatus").toLowerCase();
 
-    if(isFollowing) {
-      //get all the posts of the user since the user is following the account
-      res.json({ success: true, user: {...userData, isUserAcc: false, isFollowing: true} })
-    } else {
-      res.json({ success: true, user: {...userData, isUserAcc: false, isFollowing: false} })
-    }
+    return res.json({ success: true, user: {...userData, isUserAcc: false, followStatus: followStatus} });
     
   } else {
-    res.json({ success: false, message: "User not found" })
+    return res.json({ success: false, message: "User not found" });
   }
 }
 
 export async function handleFollow(req, res) {
   const reqUserId = req.params.id;
+
+  if(reqUserId == req.user.userId) {
+    return res.json({ success: false, message: "You cannot follow yourself" })
+  }
+
+  //if the requested user is a private account then create a REQUESTED relationship
+  const isUserPrivateQuery = `SELECT is_private FROM users WHERE _id = $1 LIMIT 1;`;
+  const userisPrivate = await query(isUserPrivateQuery, [reqUserId], "isUserPrivate");
+  let relationship = userisPrivate[0].is_private ? "REQUESTED" : "FOLLOWS";
+
   //create a FOLLOWS relationship in neo4j
-  // const createFollowQuery = `MATCH (follower:User {_id: $loggedInUser}), (following:User {_id: $requestedUser}) CREATE (follower)-[:FOLLOWS]->(following) RETURN follower, following;`;
-  // const records = await neo4jQuery(createFollowQuery, {loggedInUser: req.user.userId, requestedUser: requestedUser[0]._id}, "createFollowRelationship");
-  // console.log(records);
-  const createFollowQuery = `MATCH (follower:User {_id: $loggedInUser}), (following:User {_id: $requestedUser}) MERGE (follower)-[:FOLLOWS]->(following) RETURN follower, following;`;
+  //check for exisiting relationship between them
+  const createFollowQuery = `MATCH (follower:User {_id: $loggedInUser}), (following:User {_id: $requestedUser}) MERGE (follower)-[:${relationship}]->(following) RETURN follower, following;`;
   const records = await neo4jQuery(createFollowQuery, {loggedInUser: req.user.userId, requestedUser: reqUserId}, "createFollowRelationship");
-  console.log(records);
+  console.log("These 2 users have been connected:", records);
+
+  if(userisPrivate[0].is_private) {
+    //send a notification to the requested user that he received a follow request
+    return res.json({ success: true, message: "created REQUESTED relationship" })
+  }
 
   //update the follower and following count in postgresql
   const incrementFollowerCountQuery = `UPDATE users SET follower_count = CASE WHEN _id = $2 THEN follower_count + 1 ELSE follower_count END, following_count = CASE WHEN _id = $1 THEN following_count + 1 ELSE following_count END WHERE _id IN ($1, $2);`;
@@ -60,7 +70,41 @@ export async function handleFollow(req, res) {
   const result = await query(incrementFollowerCountQuery, values, "incrementFollower&FollowingCount");
   console.log("The counts have been incremented", result);
 
-  res.json({ success: true, message: "updated relationships and incrememnted follow counts on both accounts" })
+  return res.json({ success: true, message: "updated relationships and incrememnted follow counts on both accounts" })
+}
+
+export async function handleUnFollow(req, res) {
+  const reqUserId = req.params.id;
+
+  if(reqUserId == req.user.userId) {
+    return res.json({ success: false, message: "You cannot unfollow yourself" })
+  }
+
+  //check what type of relationship exists between the two users
+  const checkFollowStatusQuery = `MATCH (follower:User {_id: $loggedInUser})-[r:FOLLOWS|REQUESTED]->(following:User {_id: $requestedUser}) RETURN EXISTS(r) AS relationshipExists, type(r) AS followStatus`
+  const result = await neo4jQuery(checkFollowStatusQuery, {loggedInUser: req.user.userId, requestedUser: reqUserId}, "checkFollowStatus");
+  const followStatus = result[0].get("followStatus") || "NONE";
+  const relationshipExists = result[0].get("relationshipExists");
+
+  if(relationshipExists) {
+    const deleteFollowQuery = `MATCH (follower:User {_id: $loggedInUser})-[r:${followStatus}]->(following:User {_id: $requestedUser}) DELETE r;`;
+    const records = await neo4jQuery(deleteFollowQuery, {loggedInUser: req.user.userId, requestedUser: reqUserId}, "deleteFollowRelationship");
+    console.log("The relationship has been deleted:", records);
+  }
+
+  //if the followStatus was FOLLOWS then we have to decrement the counts
+  //if the followStatus was REQUESTED then we dont have to decrement the counts
+  if(followStatus == "FOLLOWS") {
+    //update the follower and following count in postgresql
+    const decrementFollowerCountQuery = `UPDATE users SET follower_count = CASE WHEN _id = $2 THEN follower_count - 1 ELSE follower_count END, following_count = CASE WHEN _id = $1 THEN following_count - 1 ELSE following_count END WHERE _id IN ($1, $2);`;
+    const values = [req.user.userId, reqUserId];
+    const result = await query(decrementFollowerCountQuery, values, "decrementFollower&FollowingCount");
+    console.log("The counts have been decremented", result);
+  } else if(followStatus == "NONE") {
+    return res.json({ success: false, message: "No relationship exists between the two users" })
+  }
+
+  return res.json({ success: true, message: `removed the relationship ${followStatus} & decremented follow counts on both accounts` })
 }
 
 export async function getUserById(req, res) {
@@ -108,13 +152,21 @@ export async function getUserById(req, res) {
 
   console.log("These is the post data:", postData);
 
-  res.json({ success: true, user: userData, posts: postData });
+  return res.json({ success: true, user: userData, posts: postData });
 }
 
 //  /:id/followers
 export async function getFollowers(req, res) {
   const reqUserId = req.params.id;
-  console.log("The user id is", reqUserId);
+  const loggedinUserId = req.user.userId;
+
+  //if both ids are different and if the loggedin user is not following the account
+  //then dont show the followers list
+  if(reqUserId != loggedinUserId) {
+    const checkFollowQuery = `MATCH (follower:User {_id: $loggedInUser})-[r:FOLLOWS]->(following:User {_id: $requestedUser}) RETURN COUNT(r) > 0 AS isFollowing;`;
+    return res.json({ success: false, message: "You are not authorized to view this account's followers" })
+  }
+
   const getUserByIdQuery = `SELECT is_private FROM users WHERE _id = $1 LIMIT 1;`;
   const userisPrivate = await query(getUserByIdQuery, [reqUserId], "getuserById");
 

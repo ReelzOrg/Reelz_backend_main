@@ -1,4 +1,6 @@
-import { driver, neo4jQuery, ogm, query } from '../../utils/connectDB.js';
+// import { driver, neo4jQuery, ogm, query } from '../../utils/connectDB.js';
+import { driver, neo4jQuery, ogm } from "../../dbFuncs/neo4jFuncs.js";
+import { query } from "../../dbFuncs/pgFuncs.js";
 
 export async function getUserProfile(req, res) {
   //req.user is the user that is logged in
@@ -22,19 +24,68 @@ export async function getUserProfile(req, res) {
 
     if(requestedUser[0]._id === req.user.userId) {
       // no further checks necessary if it is the user's own account
-      // send the userData object here
-      res.json({ success: true, user: {...userData, isUserAcc: true} })
+      // send the userData and also ***fetch all the posts***
+      const getUserPostsQuery = `
+      SELECT 
+        p.*,
+        (
+          SELECT JSON_AGG(
+            JSON_BUILD_OBJECT(
+              '_id', m._id,
+              'media_url', m.media_url,
+              'media_type', m.media_type,
+              'position', m.position,
+              'updated_at', m.updated_at
+            )
+          )
+          FROM media m
+          WHERE m.post_id = p._id
+        ) AS media_items
+      FROM posts p
+      WHERE p.user_id = $1
+      LIMIT 9;`;
+      const postData = await query(getUserPostsQuery, [req.user.userId], "getUserPosts");
+      return res.json({ success: true, user: {...userData, posts: postData, isUserAcc: true} })
     }
 
     //check if the user is following the account
-    // const checkFollowQuery = `MATCH (follower:User {_id: $loggedInUser})-[r:FOLLOWS]->(following:User {_id: $requestedUser}) RETURN COUNT(r) > 0 AS isFollowing;`;
     const checkFollowStatusQuery = `MATCH (follower:User {_id: $loggedInUser})-[r:FOLLOWS|REQUESTED]->(following:User {_id: $requestedUser}) RETURN EXISTS(r) AS relationshipExists, type(r) AS followStatus`
     const result = await neo4jQuery(checkFollowStatusQuery, {loggedInUser: req.user.userId, requestedUser: requestedUser[0]._id}, "checkFollow");
     let followStatus;
     if(result && result.length === 0) {followStatus = "none"}
     else followStatus = result[0].get("followStatus").toLowerCase();
 
-    return res.json({ success: true, user: {...userData, isUserAcc: false, followStatus: followStatus} });
+    //if the requested user is followed by the loggedin user show all the posts
+    //no matter whats the privacy status of the requested user
+    //or if the requested user is public
+    if(followStatus == "follows" || !requestedUser[0].is_private) {
+      //fetch all the posts made by the user
+      const getUserPostsQuery = `
+      SELECT 
+        p.*,
+        (
+          SELECT JSON_AGG(
+            JSON_BUILD_OBJECT(
+              '_id', m._id,
+              'media_url', m.media_url,
+              'media_type', m.media_type,
+              'position', m.position,
+              'updated_at', m.updated_at
+            )
+          )
+          FROM media m
+          WHERE m.post_id = p._id
+        ) AS media_items
+      FROM posts p
+      WHERE p.user_id = $1
+      LIMIT 9;`;
+      const postData = await query(getUserPostsQuery, [req.user.userId], "getUserPosts");
+      return res.json({ success: true, user: {...userData, posts: postData, isUserAcc: false, followStatus: followStatus} });
+    }
+    //if the requested user is private and the loggedin user have requested to follow
+    else if(requestedUser[0].is_private && (followStatus == "requested" || followStatus == "none")) {
+      return res.json({ success: true, user: {...userData, isUserAcc: false, followStatus: followStatus} });
+    }
     
   } else {
     return res.json({ success: false, message: "User not found" });
@@ -55,7 +106,11 @@ export async function handleFollow(req, res) {
 
   //create a FOLLOWS relationship in neo4j
   //check for exisiting relationship between them
-  const createFollowQuery = `MATCH (follower:User {_id: $loggedInUser}), (following:User {_id: $requestedUser}) MERGE (follower)-[:${relationship}]->(following) RETURN follower, following;`;
+  const createFollowQuery = `MATCH (follower:User {_id: $loggedInUser})
+  WITH follower
+  MATCH (following:User {_id: $requestedUser})
+  MERGE (follower)-[:${relationship}]->(following)
+  RETURN follower, following;`;
   const records = await neo4jQuery(createFollowQuery, {loggedInUser: req.user.userId, requestedUser: reqUserId}, "createFollowRelationship");
   console.log("These 2 users have been connected:", records);
 
@@ -133,10 +188,6 @@ export async function getUserById(req, res) {
   LIMIT 9;`;
   const postData = await query(getUserPostsQuery, [req.user.userId], "getUserPosts");
 
-  //get the media from the post
-  // const getMediaQuery = `SELECT * FROM media WHERE post_id = $1;`;
-  // const media = await query(getMediaQuery, [postMetaData[0]._id], "getMedia");
-
   const userData = {
     _id: user[0]._id,
     username: user[0].username,
@@ -150,62 +201,71 @@ export async function getUserById(req, res) {
     bio: user[0].bio
   }
 
-  console.log("These is the post data:", postData);
-
   return res.json({ success: true, user: userData, posts: postData });
 }
 
-//  /:id/followers
-export async function getFollowers(req, res) {
+//in the AllUserProfilePage component we get all the data of the requested user
+//based on if the loggedin user is following the account or not
+//so we can perform a check there itself and can make a request to fetch the list
+//only if the loggedin user is following the account
+export async function getNetworkList(req, res, networkType) {
   const reqUserId = req.params.id;
   const loggedinUserId = req.user.userId;
+  let getNetworkListQuery;
+  const limit = 20;
 
-  //if both ids are different and if the loggedin user is not following the account
-  //then dont show the followers list
-  if(reqUserId != loggedinUserId) {
-    const checkFollowQuery = `MATCH (follower:User {_id: $loggedInUser})-[r:FOLLOWS]->(following:User {_id: $requestedUser}) RETURN COUNT(r) > 0 AS isFollowing;`;
-    return res.json({ success: false, message: "You are not authorized to view this account's followers" })
+  if(networkType == "following") {
+    getNetworkListQuery = `MATCH (user:User {_id: $loggedInUser})-[:FOLLOWS]->(f:User)
+      RETURN COLLECT(f) AS fu;`;
+  } else if(networkType == "followers") {
+    getNetworkListQuery = `MATCH (user:User {_id: $loggedInUser})<-[:FOLLOWS]-(f:User)
+      RETURN COLLECT(f) AS fu;`;
   }
 
+  if(reqUserId == req.user.userId) {
+    /**
+     * Query to get the followers list where the followers that are also followed by
+     * the loggedin user are shown first
+     * 
+     * MATCH (targetUser:User { userId: $targetUserId })<-[:FOLLOWS]-(follower:User)
+WITH targetUser, follower
+OPTIONAL MATCH (targetUser)-[:FOLLOWS]->(follower)
+WITH targetUser, follower, CASE WHEN path IS NOT NULL THEN 1 ELSE 0 END AS followsBack
+ORDER BY followsBack DESC, follower.userId
+RETURN collect(follower.userId) AS orderedFollowerIds
+     */
+    const networkList = await neo4jQuery(getNetworkListQuery, {loggedInUser: req.user.userId}, "getNetworkListQuery");
+    const following = networkList.length > 0 ? networkList[0].get('fu') : [];
+    const userIds = following.map(userNode => userNode.properties._id);
+
+    //get the user data from postgresql
+    const getBasicUserDataQuery = `
+    SELECT _id, username, first_name, last_name, profile_picture
+    FROM users
+    WHERE _id = ANY($1::uuid[])
+    `
+    const userData = await query(getBasicUserDataQuery, [userIds], "getBasicUserData");
+    console.log("These are the usersssssss:", userData);
+
+    return res.json({success: true, network: userData});
+  }
+  
   const getUserByIdQuery = `SELECT is_private FROM users WHERE _id = $1 LIMIT 1;`;
   const userisPrivate = await query(getUserByIdQuery, [reqUserId], "getuserById");
 
-  //get the id from the jwt token
-  //compare this token of the loggedin user with the id in the request
-  //if they are different then check if the loggedin user is following the account
-  //and then return the followers list
-  let isFollowing = false;
-  console.log("The user is private", userisPrivate, reqUserId);
-  if(reqUserId == req.user.userId || !userisPrivate[0].is_private) {
-    isFollowing = true;
-  } else if(reqUserId != req.user.userId && userisPrivate[0].is_private) {
-    const checkFollowQuery = `MATCH (follower:User {_id: $loggedInUser})-[r:FOLLOWS]->(following:User {_id: $requestedUser}) RETURN COUNT(r) > 0 AS isFollowing;`;
+  //if both ids are different and if the loggedin user is not following the account
+  //then dont show the followers list
+  if(userisPrivate[0].is_private) {
+    const checkFollowQuery = `MATCH (follower:User {_id: $loggedInUser})-[r:FOLLOWS]->(following:User {_id: $requestedUser}) RETURN EXISTS(r) AS isFollowing;`;
     const result = await neo4jQuery(checkFollowQuery, {loggedInUser: req.user.userId, requestedUser: reqUserId}, "checkFollow");
-    isFollowing = result[0].get("isFollowing");
+    if(!result[0].get("isFollowing")) return res.json({ success: false, message: "You are not following this account" });
   }
-
-  //look at this query. see if it works (specially the ORDER BY clause)
-  if(isFollowing) {
-    const getFollowersListQuery = `MATCH (user:User {_id: $userId})<-[:FOLLOWS]-(follower:User)
-      WITH COUNT(follower) as count, COLLECT(follower) as followers 
-      WHERE count > 0 
-      RETURN followers
-      ORDER BY follower._id
-      SKIP $offset
-      LIMIT $limit;`;
-    const followers = await neo4jQuery(getFollowersListQuery, {userId: reqUserId, offset: 0, limit: 50}, "getFollowersList");
-    return res.json({ success: true, followers: followers.length > 0 ? followers[0].get("followers") : null });
-  }
-
-  return res.json({ success: false, message: "You are not following this account" })
-}
-
-export async function getFollowing(req, res) {
-  const username = req.params.username;
-  const getFollowingsListQuery = `MATCH (user:User {_id: $userId})-[:FOLLOWS]->(following:User) RETURN following;`;
-  const following = await neo4jQuery(getFollowingsListQuery, {userId: req.user.userId}, "getFollowingsList");
-
-  res.json({ success: true, following: following });
+  
+  const networkList = await neo4jQuery(getNetworkListQuery, {userId: reqUserId}, "getNetworkListQuery");
+  networkType == "followers"
+    ? res.json({success: true, network: networkList[0].get("followers")})
+    : res.json({success: true, network: networkList[0].get("following")});
+  return;
 }
 
 // /:id/edit-profile
@@ -216,38 +276,57 @@ export async function editProfile(req, res) {
 // /:id/post/create
 export async function handlePostUpload(req, res) {
   //upload the post to the database
-
-  //jwt token id
   const loggedInUserId = req.user.userId;
-  //url id
   const apiId = req.params.id;
 
-  if(loggedInUserId != apiId) {
-    return res.json({ success: false, message: "You are not authorized to upload a post on this account" })
-  }
-
   //get the post id from this query
-  const postQuery = `
-      WITH new_post AS (
-        INSERT INTO posts (user_id, caption) 
-        VALUES ($1, $2)
-        RETURNING _id
-      ),
-      update_user AS (
-        UPDATE users 
-        SET post_count = post_count + 1 
-        WHERE _id = $1
-      )
-      INSERT INTO media (post_id, media_url, media_type, position)
-      SELECT _id, $3, $4, 1 FROM new_post
-      RETURNING *;
-    `;
+  const postQuery = typeof req.body.mediaUrl == "string" ? `
+    WITH new_post AS (
+      INSERT INTO posts (user_id, caption) 
+      VALUES ($1, $2)
+      RETURNING _id
+    ),
+    update_user AS (
+      UPDATE users 
+      SET post_count = post_count + 1 
+      WHERE _id = $1
+    )
+    INSERT INTO media (post_id, media_url, media_type, position)
+    SELECT _id, $3, $4, 1 FROM new_post
+    RETURNING *;`
+    : `
+    WITH new_post AS (
+      INSERT INTO posts (user_id, caption)
+      VALUES ($1, $2)
+      RETURNING _id
+    ),
+    update_user AS (
+      UPDATE users
+      SET post_count = post_count + 1
+      WHERE _id = $1
+    )
+    INSERT INTO media (post_id, media_url, media_type, position)
+    SELECT
+      new_post._id,
+      m.url,
+      m.type,
+      m.pos
+    FROM new_post
+    CROSS JOIN unnest($3::text[], $4::text[]) WITH ORDINALITY AS m(url, type, pos)
+    RETURNING *;`;
     //, (SELECT _id FROM new_post) AS post_id
-  const post = await query(postQuery, [loggedInUserId, req.body.caption, req.body.mediaUrl, req.body.mediaType], "createPost");
+  const post = await query(postQuery, [loggedInUserId, req.body.caption, req.body.mediaUrl, req.body.fileType], "createPost");
 
   //create the node for the post in neo4j and create a relationship from the user to the post
   const createPostQuery = `MATCH (user:User {_id: $userId}) CREATE (post:Post {_id: $postId}) CREATE (user)-[:POSTED]->(post) RETURN post;`;
   const neo4jPost = await neo4jQuery(createPostQuery, {userId: loggedInUserId, postId: post[0].post_id}, "createPost");
 
-  res.json({ success: true, message: "Post uploaded successfully", post: post[0] })
+  return { success: true, message: "Post uploaded successfully", post: post }
+  // res.json({ success: true, message: "Post uploaded successfully", post: post })
 }
+
+//0f9214c2-2cd3-4f06-8f06-d5b1ff521419
+//https://reelzapp.s3.us-east-1.amazonaws.com/userPosts/bf5bd32d-d037-411d-9e5d-6323cc6199ca/post_1000000040
+
+//7309bd33-0243-4da4-80f7-2e74c8326436
+//https://reelzapp.s3.us-east-1.amazonaws.com/userPosts/bf5bd32d-d037-411d-9e5d-6323cc6199ca/post_1000000039

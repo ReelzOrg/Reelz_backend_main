@@ -1,0 +1,11 @@
+# ENV files
+.env
+
+# Ignore node_modules
+node_modules
+
+# MISC
+.git
+.vscode
+TODO.txt
+README.md

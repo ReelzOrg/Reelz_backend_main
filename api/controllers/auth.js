@@ -2,7 +2,9 @@ import 'dotenv/config.js';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 
-import { createUserWithDriver, query } from '../../utils/connectDB.js';
+// import { createUserWithDriver, query } from '../../utils/connectDB.js';
+import { createUserWithDriver } from '../../dbFuncs/neo4jFuncs.js';
+import { query } from '../../dbFuncs/pgFuncs.js';
 import { verifyEmail } from '../../utils.js';
 
 export async function loginUser(req, res) {

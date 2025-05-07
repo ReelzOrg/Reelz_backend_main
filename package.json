@@ -30,7 +30,8 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.2",
     "neo4j-driver": "^5.28.1",
-    "pg": "^8.14.1"
+    "pg": "^8.14.1",
+    "typesense": "^2.0.3"
   },
   "devDependencies": {
     "@types/pg": "^8.11.11"

@@ -1,8 +1,6 @@
 import 'dotenv/config.js'
-import pgsql from 'pg';
-
-import { OGM } from '@neo4j/graphql-ogm';
 import neo4j from 'neo4j-driver';
+import { OGM } from '@neo4j/graphql-ogm';
 
 const typeDefs = `
   type User {
@@ -12,40 +10,10 @@ const typeDefs = `
   }
 `;
 
-const pool = new pgsql.Pool({
-  user: process.env.POSTGRES_USER,
-  host: process.env.POSTGRES_HOST,
-  database: process.env.POSTGRES_DB,
-  password: process.env.POSTGRES_PASSWORD,
-  port: parseInt(process.env.POSTGRES_PORT || "5432"), // Default PostgreSQL port
-});
-
 //Establish Neo4j connection
 export const driver = neo4j.driver(process.env.NEO4J_URI, neo4j.auth.basic(process.env.NEO4J_USERNAME, process.env.NEO4J_PASSWORD), /*{maxConnectionPoolSize: 100,connectionTimeout: 30000}*/);
 export const ogm = new OGM({ typeDefs, driver });
 await ogm.init();
-
-export async function query(queryStr, params, name="default") {
-  try {
-    const start = Date.now();
-    const result = await pool.query(queryStr, params);
-    const duration = Date.now() - start;
-    console.log(`Query ${name} executed in ${duration}ms`);
-    return result.rows;
-  } catch(err) {
-    console.error(`Database query error(${name}):`, err);
-  }
-}
-
-export async function closePool() {
-  try {
-    await pool.end();
-    console.log("PostgreSQL connection pool closed.");
-  } catch (error) {
-    console.error("Error closing pool:", error);
-  }
-};
-
 
 /**
  * Execute a raw Cypher query with parameters. User this function for complex queries

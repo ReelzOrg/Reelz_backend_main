@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
 import { query, closePool } from './utils/connectDB.js';
-import { authRouter, userDataRouter } from './api/routes/index.js';
+import { authRouter, userDataRouter, searchRouter } from './api/routes/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -25,6 +25,7 @@ app.use(bodyParser.urlencoded({extended: true}));
 
 app.use("/api/auth", authRouter);
 app.use("/api/user", userDataRouter);
+app.use("/api", searchRouter);
 
 app.get("/", async (req, res) => {
   //fetch all the latests posts and storise by users following list

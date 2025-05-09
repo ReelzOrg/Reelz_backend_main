@@ -49,7 +49,7 @@ export async function getUserProfile(req, res) {
     }
 
     //check if the user is following the account
-    const checkFollowStatusQuery = `MATCH (follower:User {_id: $loggedInUser})-[r:FOLLOWS|REQUESTED]->(following:User {_id: $requestedUser}) RETURN EXISTS(r) AS relationshipExists, type(r) AS followStatus`
+    const checkFollowStatusQuery = `MATCH (follower:User {_id: $loggedInUser})-[r:FOLLOWS|REQUESTED]->(following:User {_id: $requestedUser}) RETURN (r IS NOT NULL) AS relationshipExists, type(r) AS followStatus`
     const result = await neo4jQuery(checkFollowStatusQuery, {loggedInUser: req.user.userId, requestedUser: requestedUser[0]._id}, "checkFollow");
     let followStatus;
     if(result && result.length === 0) {followStatus = "none"}

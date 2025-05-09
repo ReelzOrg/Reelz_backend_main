@@ -7,8 +7,10 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
-import { query, closePool } from './utils/connectDB.js';
+// import { query, closePool } from './utils/connectDB.js';
+import { query, closePool } from './dbFuncs/pgFuncs.js';
 import { authRouter, userDataRouter, searchRouter } from './api/routes/index.js';
+import { initTypesense, syncTypeSense } from './dbFuncs/typesenseFuncs.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -26,6 +28,15 @@ app.use(bodyParser.urlencoded({extended: true}));
 app.use("/api/auth", authRouter);
 app.use("/api/user", userDataRouter);
 app.use("/api", searchRouter);
+
+//TypeSence Functions ---------------------------
+await initTypesense();
+await syncTypeSense();
+
+if(process.env.NODE_ENV == "production") {
+  setInterval(syncTypeSense, 60 * 60 * 1000); // Hourly
+}
+// ----------------------------------------------
 
 app.get("/", async (req, res) => {
   //fetch all the latests posts and storise by users following list

@@ -1,28 +1,24 @@
 import express from 'express';
 // import { search } from '../../utils/typesenseUtils';
-import { search } from '../../dbFuncs/typesenseFuncs.js';
+import { searchTypeSense } from '../../dbFuncs/typesenseFuncs.js';
 const router = express.Router();
 
 router.get("/search", async (req, res) => {
   try {
-    const result = await search(
+    const result = await searchTypeSense(
       'users', //Collection name
-      req.query.q, //query term
+      req.query.searchTerm, //search term
       "username,first_name,last_name", //query_by
-      req.query.filters //filters
+      req.query.filters || "" //filters
     );
 
-    console.log("THESE ARE THE SEARCH RESULTS:", result);
-
-    res.json(result);
+    // console.log("THESE ARE THE SEARCH RESULTS:", result.hits.map(hit => hit.document));
+    console.log("The typesense search took this much time: ", result.search_time_ms)
+    
+    res.json(result.hits.map(hit => hit.document));
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
-});
-
-router.post('/sync-users', async (req, res) => {
-  await syncAllUsers();
-  res.json({ status: 'sync completed' });
 });
 
 export default router;

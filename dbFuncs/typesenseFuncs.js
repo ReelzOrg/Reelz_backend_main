@@ -12,54 +12,92 @@ let client = new TypeSense.Client({
   'cacheSearchResultsForSeconds': 5
 });
 
+//TODO: change the id to _id
 const usersSchema = {
   name: 'users',
   fields: [
-    { name: '_id', type: 'string' },
-    { name: 'username', type: 'string', facet: true },
-    { name: 'first_name', type: 'string', facet: true },
-    { name: 'last_name', type: 'string', facet: true },
+    { name: 'id', type: 'string', facet: false },
+    { name: 'username', type: 'string', facet: false },
+    { name: 'first_name', type: 'string', facet: false },
+    { name: 'last_name', type: 'string', facet: false },
     { name: 'created_at', type: 'int64' }
   ]
 };
 
-await client.collections().create(usersSchema);
+// Initialize Typesense
+export const initTypesense = async () => {
+  try {
+    const data = await client.collections().create(usersSchema);
+    console.log('Typesense collection created');
+  } catch (e) {
+    if (!e.message.includes('exists')) throw e;
+  }
+};
 
-async function syncUsers() {
-  console.log("SYNC USERS IS RUNNING!!!!!!!");
-  const { rows } = await query('SELECT _id, username, email, created_at FROM users;', [], "getTypesenseData");
-  
-  // await client.collections('users').documents().import(
-  //   rows.map(user => ({
-  //     _id: user._id.toString(),
-  //     username: user.username.toString(),
-  //     first_name: user.first_name.toString(),
-  //     last_name: user.last_name.toString(),
-  //     created_at: Math.floor(new Date(user.created_at)/1000)
-  //   }))
-  // );
-  await Promise.all(users.map(indexUser));
+async function ensureCollection(collectionName, collectionSchema) {
+  try {
+    let x = await client.collections(collectionName).retrieve();
+    console.log(collectionName + ' collection found');
+    console.log(x.num_documents);
+  } catch (error) {
+    if (error.httpStatus === 404) {
+      console.log(collectionName + ' collection not found, creating...');
+      await client.collections().create(collectionSchema);
+      console.log('Created the ' + collectionName + ' collection');
+    } else {
+      throw error;
+    }
+  }
 }
 
-await syncUsers();
+export async function syncTypeSense(syncSingleUser = false, id = "") {
+  // const y = await client.collections('users').delete();
+  // console.log(y);
+  await ensureCollection('users', usersSchema);
+  // const x = await client.collections('users').documents().search({
+  //   q: "*",
+  //   per_page: 1
+  // });
+  // console.log("The number of users", x.hits.map((doc) => doc));
+  // console.log("SYNC USERS IS RUNNING!!!!!!!");
+  let result = syncSingleUser
+  ? await query('SELECT _id, username, first_name, last_name, created_at FROM users WHERE _id = $1', [id], "syncSingleUser")
+  : await query('SELECT _id, username, first_name, last_name, created_at FROM users;', [], "syncAllUsers")
+  
+  await client.collections('users').documents().import(
+    result.map(user => ({
+      id: user._id.toString(),
+      username: user.username.toString(),
+      first_name: user.first_name.toString(),
+      last_name: user.last_name.toString(),
+      created_at: Math.floor(new Date(user.created_at)/1000)
+    })),
+    { action: 'upsert' }  // Update existing records
+  );
+  // await Promise.all(users.map(indexUser));
+}
 
-export async function search(collection, query, query_by, filterBy, per_page = 10) {
+// await syncAllUsers();
+
+export async function searchTypeSense(collection, query, query_by, filterBy, per_page = 10) {
   return client.collections(collection).documents().search({
     q: query,
     query_by: query_by,
+    prefix: true,
     filter_by: filterBy,
-    per_page: per_page
+    per_page: per_page,
+    min_len_1typo: 3
   })
 }
 
-export const indexUser = async (user) => {
-  return typesense.collections('users')
-    .documents()
-    .upsert({
-      id: user.id.toString(),
-      name: user.name,
-      email: user.email,
-      bio: user.bio,
-      created_at: Math.floor(new Date(user.created_at)/1000)
-    });
-};
+// export const indexUser = async (user) => {
+//   return client.collections('users')
+//     .documents()
+//     .upsert({
+//       id: user.id.toString(),
+//       name: user.name,
+//       email: user.email,
+//       bio: user.bio,
+//       created_at: Math.floor(new Date(user.created_at)/1000)
+//     });
+// };

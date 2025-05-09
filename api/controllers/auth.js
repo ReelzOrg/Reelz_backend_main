@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs';
 import { createUserWithDriver } from '../../dbFuncs/neo4jFuncs.js';
 import { query } from '../../dbFuncs/pgFuncs.js';
 import { verifyEmail } from '../../utils.js';
+import { syncTypeSense } from '../../dbFuncs/typesenseFuncs.js';
 
 export async function loginUser(req, res) {
   const { email, password } = req.body;
@@ -75,6 +76,9 @@ export async function registerUser(req, res) {
   //also create a node in the NEO4J database
   const neo4jUser = await createUserWithDriver(req.body.username, savedUser[0]._id);
   console.log("This is the neo4j user", neo4jUser);
+
+  //Sync the newly created user with typesense
+  await syncTypeSense(true, savedUser[0]._id);
 
   //creating a user in postgresql is more important
   if(savedUser) {

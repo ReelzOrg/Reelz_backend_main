@@ -1,6 +1,6 @@
 import express from 'express';
 
-import { editProfile, getNetworkList, getUserById, getUserProfile, handleFollow, handlePostUpload, handleUnFollow } from '../controllers/userData.js';
+import { editProfile, getNetworkList, getUserBasicData, getUserFeed, getUserPosts, getUserProfile, handleFollow, handlePostUpload, handleUnFollow } from '../controllers/userData.js';
 import authenticateToken from '../../utils/authenticateToken.js';
 import { getMultipleSignedUrls, getS3SignedUrl } from '../controllers/uploadToS3.js';
 import checkUserAuthorization from '../../utils/checkUserAuthorization.js';
@@ -10,17 +10,21 @@ import { query } from "../../dbFuncs/pgFuncs.js"
 // /api/user
 const router = express.Router();
 
+router.get("/", authenticateToken, getUserBasicData);
+
 //remove this route and instead make a request from the api below
 //after the first time the user logs in, save the user id in expo secure store
 //and for any further requests use the userID from secure store
-router.get("/me", authenticateToken, getUserById);
+// router.get("/me", authenticateToken, getUserById);
+router.get("/posts", authenticateToken, getUserPosts);
+router.get("/feed", authenticateToken, getUserFeed);
 
 //we are using username for this one becuase this route will handle detching profile data
 //for other users. Since on the frontend we only have the username
 router.get("/:username", authenticateToken, getUserProfile);
 
-router.get("/:id/follow", authenticateToken, checkUserAuthorization, handleFollow);
-router.get("/:id/unfollow", authenticateToken, checkUserAuthorization, handleUnFollow);
+router.get("/:id/follow", authenticateToken, handleFollow);
+router.get("/:id/unfollow", authenticateToken, handleUnFollow);
 
 router.get("/:id/followers", authenticateToken, checkUserAuthorization, (req, res) => getNetworkList(req, res, "followers"));
 router.get("/:id/following", authenticateToken, checkUserAuthorization, (req, res) => getNetworkList(req, res, "following"));
@@ -34,7 +38,7 @@ router.post("/:id/save-post-media", authenticateToken, checkUserAuthorization, a
 
   //create a post in the database, update post count, & insert a blank media_url in the media table
   const getPostMediaData = await handlePostUpload(req, res);
-  // console.log("The post has been created:", getPostMediaData);
+  console.log("The post has been created:", getPostMediaData);
   if(getPostMediaData.success == false) {
     return res.json(getPostMediaData);
   }
@@ -42,7 +46,7 @@ router.post("/:id/save-post-media", authenticateToken, checkUserAuthorization, a
   const mediaPath = typeof req.body.fileType == "string"
   ? `userPosts/${req.user.userId}/${getPostMediaData.post[0].post_id}/${req.body.fileName}`
   : req.body.fileName.map((file) => `userPosts/${req.user.userId}/${getPostMediaData.post[0].post_id}/${file}`);
-  // console.log("the media path is:", mediaPath);
+  console.log("the media path is:", mediaPath);
 
   let x = typeof req.body.fileType == "string"
   ? await getS3SignedUrl(res, mediaPath, req.body.fileType)
@@ -50,7 +54,7 @@ router.post("/:id/save-post-media", authenticateToken, checkUserAuthorization, a
 
   console.log(x);
 
-  if(x.success) {
+  if(x && x.success) {
     //since the above query sets a blank url in the media table
     //we are just adding the media_url but still have uploaded the media to s3
     //this will be done by frontend
@@ -64,7 +68,9 @@ router.post("/:id/save-post-media", authenticateToken, checkUserAuthorization, a
       ) AS u(media_url, id)
       WHERE m._id = u.id
       RETURNING m.*;`;
-    const result = await query(updateMediaQuery, [x.fileURLs, getPostMediaData.post.map((singleMedia) => singleMedia._id)], "updateMediaURL");
+    const result = typeof req.body.fileType == "string"
+    ? await query(updateMediaQuery, [x.fileURL, getPostMediaData.post[0]._id], "updateMediaURL")
+    : await query(updateMediaQuery, [x.fileURLs, getPostMediaData.post.map((singleMedia) => singleMedia._id)], "updateMediaURLs");
     // console.log("The media url has been updated:", result);
   }
   return res.json(x);

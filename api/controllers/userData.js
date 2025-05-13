@@ -2,9 +2,35 @@
 import { driver, neo4jQuery, ogm } from "../../dbFuncs/neo4jFuncs.js";
 import { query } from "../../dbFuncs/pgFuncs.js";
 
+/** Time decayed weight calculation for the closeness of 2 users
+ * MATCH (u1:User)-[follow:FOLLOWS]->(u2:User)
+OPTIONAL MATCH (u1)-[interaction:LIKED|COMMENTED|SHARED]->(post:Post)<-[:POSTED]-(u2)
+WITH u1, u2, follow, interaction, post,
+     duration.inDays(date(interaction.timestamp), date()).days AS days_ago
+SET follow.weight = 1 + sum(
+  CASE 
+    WHEN interaction IS NULL THEN 0
+    WHEN days_ago < 7 THEN 1.0    // Full value for recent interactions
+    WHEN days_ago < 30 THEN 0.5   // Half value for older interactions
+    ELSE 0.2                      // Minimal value for very old interactions
+  END
+)
+RETURN count(follow) AS relationships_updated
+ */
+
+export async function getUserBasicData(req, res) {
+  const loggedInUser = req.user.userId;
+
+  const getUserBasicDataQuery = `SELECT * FROM users WHERE _id = $1;`;
+  const basicData = await query(getUserBasicDataQuery, [loggedInUser], "getBasicUserData");
+
+  res.json({ success: true, user: basicData });
+}
+
 export async function getUserProfile(req, res) {
   //req.user is the user that is logged in
   const reqUserUsername = req.params.username;
+  
   const userProfileQuery = `SELECT * FROM users WHERE username = $1 LIMIT 1;`;
   const requestedUser = await query(userProfileQuery, [reqUserUsername], "getUserByUsername");
 
@@ -80,16 +106,59 @@ export async function getUserProfile(req, res) {
       WHERE p.user_id = $1
       LIMIT 9;`;
       const postData = await query(getUserPostsQuery, [req.user.userId], "getUserPosts");
-      return res.json({ success: true, user: {...userData, posts: postData, isUserAcc: false, followStatus: followStatus} });
+      return res.json({ success: true, user: {...userData, isUserAcc: false, followStatus: followStatus}, posts: postData });
     }
     //if the requested user is private and the loggedin user have requested to follow
     else if(requestedUser[0].is_private && (followStatus == "requested" || followStatus == "none")) {
       return res.json({ success: true, user: {...userData, isUserAcc: false, followStatus: followStatus} });
     }
-    
   } else {
     return res.json({ success: false, message: "User not found" });
   }
+}
+
+export async function getUserFeed(req, res) {
+  const loggedInUser = req.user.userId;
+
+  const getTotalUserFollows = `MATCH (:User {_id: $loggedInUser})-[:FOLLOWS]->(f:User) RETURN count(f) AS totalFollows`;
+  const totalFollows = await neo4jQuery(getTotalUserFollows, {loggedInUser}, "getUserFollows")
+  const topLimit = parseInt(Math.ceil(parseFloat(totalFollows[0].get('totalFollows')) * 0.1));
+
+  const userFeedQuery2 = `
+  // 1. Start with the user
+MATCH (userA:User {id: $loggedInUser})
+
+// 2. Get top 10% followed accounts
+WITH userA
+MATCH (userA)-[followRel:FOLLOWS]->(followed:User)
+WITH userA, followed, followRel.weight AS followWeight
+ORDER BY followWeight DESC
+LIMIT toInteger($topLimit)
+
+// 3. Get their prioritized posts
+MATCH (followed)-[:POSTED]->(priorityPost:Post)
+WHERE priorityPost.created_at > datetime() - duration('P2D')
+WITH userA, priorityPost, followWeight, followWeight * 1.5 AS postScore
+
+// 4. Get regular posts from other follows
+MATCH (userA)-[:FOLLOWS]->(regularFollowed:User)-[:POSTED]->(regularPost:Post)
+WHERE regularPost.created_at > datetime() - duration('P2D')
+AND NOT EXISTS { (userA)-[:VIEWED]->(regularPost) }
+
+// 5. Combine and rank
+WITH 
+  collect({post: priorityPost, score: postScore}) + 
+  collect({post: regularPost, score: followWeight}) AS allPosts
+UNWIND allPosts AS feedItem
+RETURN feedItem.post AS post,
+       feedItem.score AS relevanceScore
+ORDER BY relevanceScore DESC, post.created_at DESC
+LIMIT 20`
+
+  const userFeed = await neo4jQuery(userFeedQuery2, {loggedInUser: loggedInUser, topLimit: topLimit}, "getUserFeed");
+  console.log("The user feed is:", userFeed);
+
+  res.json({ success: true, feed: [] })
 }
 
 export async function handleFollow(req, res) {
@@ -104,12 +173,26 @@ export async function handleFollow(req, res) {
   const userisPrivate = await query(isUserPrivateQuery, [reqUserId], "isUserPrivate");
   let relationship = userisPrivate[0].is_private ? "REQUESTED" : "FOLLOWS";
 
-  //create a FOLLOWS relationship in neo4j
-  //check for exisiting relationship between them
-  const createFollowQuery = `MATCH (follower:User {_id: $loggedInUser})
+  //create a FOLLOWS/REQUESTED relationship in neo4j with a weight that defines the closeness of the users
+  //when the user first follows someone, set the weight to 1 so that the user gets a chance to be on the 
+  //loggedInUsers feed then change it to 0.1
+  //Create a constraint ensuring all FOLLOWS relationships have weight = 0.1 rather than involving it in every first follow
+  /**
+   * CREATE CONSTRAINT default_follows_weight 
+   * FOR ()-[r:FOLLOWS]->() 
+   * REQUIRE r.weight IS NOT NULL AND r.weight = 0.1
+   */
+  const createFollowQuery = relationship == "FOLLOWS"
+  ? `MATCH (follower:User {_id: $loggedInUser})
   WITH follower
   MATCH (following:User {_id: $requestedUser})
-  MERGE (follower)-[:${relationship}]->(following)
+  MERGE (follower)-[r:FOLLOWS]->(following)
+  ON CREATE SET r.weight = 0.1, r.timeStamp = datetime()
+  RETURN follower, following;`
+  : `MATCH (follower:User {_id: $loggedInUser})
+  WITH follower
+  MATCH (following:User {_id: $requestedUser})
+  MERGE (follower)-[r:REQUESTED]->(following)
   RETURN follower, following;`;
   const records = await neo4jQuery(createFollowQuery, {loggedInUser: req.user.userId, requestedUser: reqUserId}, "createFollowRelationship");
   console.log("These 2 users have been connected:", records);
@@ -162,9 +245,9 @@ export async function handleUnFollow(req, res) {
   return res.json({ success: true, message: `removed the relationship ${followStatus} & decremented follow counts on both accounts` })
 }
 
-export async function getUserById(req, res) {
-  const getUserByIdQuery = `SELECT * FROM users WHERE _id = $1 LIMIT 1;`;
-  const user = await query(getUserByIdQuery, [req.user.userId], "getuserById");
+export async function getUserPosts(req, res) {
+  // const getUserByIdQuery = `SELECT * FROM users WHERE _id = $1 LIMIT 1;`;
+  // const user = await query(getUserByIdQuery, [req.user.userId], "getuserById");
 
   //get all users posts (limit 9)
   const getUserPostsQuery = `
@@ -188,20 +271,21 @@ export async function getUserById(req, res) {
   LIMIT 9;`;
   const postData = await query(getUserPostsQuery, [req.user.userId], "getUserPosts");
 
-  const userData = {
-    _id: user[0]._id,
-    username: user[0].username,
-    first_name: user[0].first_name,
-    last_name: user[0].last_name,
-    follower_count: user[0].follower_count,
-    following_count: user[0].following_count,
-    post_count: user[0].post_count,
-    profile_picture: user[0].profile_picture,
-    is_private: user[0].is_private,
-    bio: user[0].bio
-  }
+  // BECAUSE WE ARE ALREADY FETCHING ALL THE USER DATA IN THE api/user ROUTE
+  // const userData = {
+  //   _id: user[0]._id,
+  //   username: user[0].username,
+  //   first_name: user[0].first_name,
+  //   last_name: user[0].last_name,
+  //   follower_count: user[0].follower_count,
+  //   following_count: user[0].following_count,
+  //   post_count: user[0].post_count,
+  //   profile_picture: user[0].profile_picture,
+  //   is_private: user[0].is_private,
+  //   bio: user[0].bio
+  // }
 
-  return res.json({ success: true, user: userData, posts: postData });
+  return res.json({ success: true, /*user: userData,*/ posts: postData });
 }
 
 //in the AllUserProfilePage component we get all the data of the requested user
@@ -318,7 +402,7 @@ export async function handlePostUpload(req, res) {
   const post = await query(postQuery, [loggedInUserId, req.body.caption, req.body.mediaUrl, req.body.fileType], "createPost");
 
   //create the node for the post in neo4j and create a relationship from the user to the post
-  const createPostQuery = `MATCH (user:User {_id: $userId}) CREATE (post:Post {_id: $postId}) CREATE (user)-[:POSTED]->(post) RETURN post;`;
+  const createPostQuery = `MATCH (user:User {_id: $userId}) CREATE (post:Post {_id: $postId, created_at: datetime()}) CREATE (user)-[:POSTED]->(post) RETURN post;`;
   const neo4jPost = await neo4jQuery(createPostQuery, {userId: loggedInUserId, postId: post[0].post_id}, "createPost");
 
   return { success: true, message: "Post uploaded successfully", post: post }

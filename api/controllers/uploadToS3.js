@@ -21,12 +21,18 @@ export async function getS3SignedUrl(res, filePath, fileType) {
 
   try {
     const signedUrl = await getSignedUrl(s3, command, { expiresIn: 300 });
-    // console.log("got the signed url", signedUrl)
-    res.json({
+    console.log("got the signed url", signedUrl);
+
+    return {
       success: true,
       uploadURL: signedUrl,
       fileURL: `https://reelzapp.s3.us-east-1.amazonaws.com/${filePath}`
-    })
+    }
+    // res.json({
+    //   success: true,
+    //   uploadURL: signedUrl,
+    //   fileURL: `https://reelzapp.s3.us-east-1.amazonaws.com/${filePath}`
+    // })
   } catch(err) {
     console.log("Error while generating a url", err);
     res.status(500).json({ success: false, error: err.message })

@@ -2,7 +2,7 @@ import 'dotenv/config.js';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
-const s3 = new S3Client({
+export const s3 = new S3Client({
   region: 'us-east-1',
   credentials: {
     accessKeyId: process.env.AWS_ACCESS_KEY,
@@ -18,6 +18,8 @@ export async function getS3SignedUrl(res, filePath, fileType) {
     // ACL: "public-read",
     // Body: await readFile(file)
   });
+
+  console.log("The file type of the new post is:", fileType);
 
   try {
     const signedUrl = await getSignedUrl(s3, command, { expiresIn: 300 });

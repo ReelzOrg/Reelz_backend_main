@@ -30,6 +30,7 @@ export async function getUserBasicData(req, res) {
 export async function getUserProfile(req, res) {
   //req.user is the user that is logged in
   const reqUserUsername = req.params.username;
+  const reqUserOffset = req.query.offset || 0;
   
   const userProfileQuery = `SELECT * FROM users WHERE username = $1 LIMIT 1;`;
   const requestedUser = await query(userProfileQuery, [reqUserUsername], "getUserByUsername");
@@ -69,8 +70,9 @@ export async function getUserProfile(req, res) {
         ) AS media_items
       FROM posts p
       WHERE p.user_id = $1
-      LIMIT 9;`;
-      const postData = await query(getUserPostsQuery, [req.user.userId], "getUserPosts");
+      LIMIT 9
+      OFFSET $2;`;
+      const postData = await query(getUserPostsQuery, [req.user.userId, reqUserOffset], "getUserPosts");
       return res.json({ success: true, user: {...userData, posts: postData, isUserAcc: true} })
     }
 
@@ -120,45 +122,114 @@ export async function getUserProfile(req, res) {
 export async function getUserFeed(req, res) {
   const loggedInUser = req.user.userId;
 
+  //TODO: make the frontend return the number of follows instead of quering neo4j
   const getTotalUserFollows = `MATCH (:User {_id: $loggedInUser})-[:FOLLOWS]->(f:User) RETURN count(f) AS totalFollows`;
   const totalFollows = await neo4jQuery(getTotalUserFollows, {loggedInUser}, "getUserFollows")
   const topLimit = parseInt(Math.ceil(parseFloat(totalFollows[0].get('totalFollows')) * 0.1));
 
   const userFeedQuery2 = `
   // 1. Start with the user
-MATCH (userA:User {id: $loggedInUser})
+MATCH (userA:User {_id: $loggedInUser})
 
 // 2. Get top 10% followed accounts
 WITH userA
 MATCH (userA)-[followRel:FOLLOWS]->(followed:User)
-WITH userA, followed, followRel.weight AS followWeight
+WITH userA, followRel.weight AS followWeight, collect(followed) AS topFollowedUsers
 ORDER BY followWeight DESC
 LIMIT toInteger($topLimit)
 
 // 3. Get their prioritized posts
+UNWIND topFollowedUsers AS followed
 MATCH (followed)-[:POSTED]->(priorityPost:Post)
-WHERE priorityPost.created_at > datetime() - duration('P2D')
-WITH userA, priorityPost, followWeight, followWeight * 1.5 AS postScore
+WHERE priorityPost.created_at > datetime() - duration('P14D') //change it to 7
+WITH userA, topFollowedUsers, collect({post: priorityPost, score: followWeight * 1.1, user: followed}) AS priorityPosts
 
 // 4. Get regular posts from other follows
-MATCH (userA)-[:FOLLOWS]->(regularFollowed:User)-[:POSTED]->(regularPost:Post)
-WHERE regularPost.created_at > datetime() - duration('P2D')
-AND NOT EXISTS { (userA)-[:VIEWED]->(regularPost) }
+OPTIONAL MATCH (userA)-[regularFollowRel:FOLLOWS]->(regularFollowed:User)-[:POSTED]->(regularPost:Post)
+WHERE regularPost.created_at > datetime() - duration('P7D')
+AND NOT regularFollowed IN topFollowedUsers
+// AND NOT EXISTS { (userA)-[:VIEWED]->(regularPost) }
+WITH priorityPosts, collect({post: regularPost, score: regularFollowRel.weight, user: regularFollowed}) AS regularPosts
 
 // 5. Combine and rank
-WITH 
-  collect({post: priorityPost, score: postScore}) + 
-  collect({post: regularPost, score: followWeight}) AS allPosts
+// WITH 
+//   collect({post: priorityPost, score: postScore, user: followed}) + 
+//   collect({post: regularPost, score: followWeight, user: regularFollowed}) AS allPosts
+// WITH priorityPosts + regularPosts AS allPosts
+WITH [item IN (priorityPosts + regularPosts) WHERE item.post IS NOT NULL] AS allPosts
 UNWIND allPosts AS feedItem
-RETURN feedItem.post AS post,
-       feedItem.score AS relevanceScore
+RETURN DISTINCT feedItem.post AS post,
+  feedItem.score AS relevanceScore,
+  feedItem.user AS poster
 ORDER BY relevanceScore DESC, post.created_at DESC
 LIMIT 20`
 
-  const userFeed = await neo4jQuery(userFeedQuery2, {loggedInUser: loggedInUser, topLimit: topLimit}, "getUserFeed");
-  console.log("The user feed is:", userFeed);
+  const getViewedPostIdsQuery = `SELECT post_id FROM usersviewedposts WHERE user_id = $1 AND viewed_at > NOW() - INTERVAL '14 days'`;
+  let viewedPostIds = await query(getViewedPostIdsQuery, [loggedInUser], "getViewedPostIds");
+  viewedPostIds = viewedPostIds.map((postId) => postId.post_id)
 
-  res.json({ success: true, feed: [] })
+  const userFeed = await neo4jQuery(userFeedQuery2, {loggedInUser: loggedInUser, topLimit: topLimit}, "getUserFeed");
+  const userFeedPostIds = userFeed.map((post) =>
+    [post.get("post").properties._id, post.get("relevanceScore"), post.get("poster").properties._id])
+  .filter((item) => !viewedPostIds.includes(item[0]));
+
+  if(userFeedPostIds.length == 0) {
+    return res.json({ success: true, feed: [] });
+  }
+
+  const getFeedPostsQuery = `
+  WITH post_ids AS (
+    SELECT 
+      unnest($1::uuid[]) AS post_id,
+      unnest($2::float[]) AS relevance_score,
+      unnest($3::uuid[]) AS user_id
+  )
+  SELECT
+    json_agg(
+      json_build_object(
+        'post', json_build_object(
+          '_id', p._id,
+          'user_id', p.user_id,
+          'caption', p.caption,
+          'like_count', p.like_count,
+          'comment_count', p.comment_count,
+          'share_count', p.share_count,
+          'created_at', p.created_at,
+          'media_items', (
+            SELECT json_agg(
+              json_build_object(
+                '_id', m._id,
+                'post_id', m.post_id,
+                'media_type', m.media_type,
+                'media_url', m.media_url,
+                'position', m.position,
+                'media_alt', m.media_alt
+              )
+            )
+            FROM media m
+            WHERE m.post_id = p._id
+          )
+        ),
+        'user', json_build_object(
+          '_id', u._id,
+          'username', u.username,
+          'first_name', u.first_name,
+          'last_name', u.last_name,
+          'profile_picture', u.profile_picture
+        ),
+        'relevance_score', pd.relevance_score
+      )
+    ) AS feed_items
+  FROM posts p
+  JOIN users u ON p.user_id = u._id
+  JOIN post_ids pd ON p._id = pd.post_id
+  GROUP BY p._id, u._id, pd.relevance_score, p.created_at
+  ORDER BY pd.relevance_score DESC, p.created_at DESC
+  `;
+  const feedPosts = await query(getFeedPostsQuery, [userFeedPostIds.map((posts) => posts[0]), userFeedPostIds.map((posts) => posts[1]), userFeedPostIds.map((posts) => posts[2])], "getFeedPosts");
+  // console.log("These are the entire posts data:", feedPosts);
+
+  return res.json({ success: true, feed: feedPosts });
 }
 
 export async function handleFollow(req, res) {
@@ -249,6 +320,8 @@ export async function getUserPosts(req, res) {
   // const getUserByIdQuery = `SELECT * FROM users WHERE _id = $1 LIMIT 1;`;
   // const user = await query(getUserByIdQuery, [req.user.userId], "getuserById");
 
+  const reqUserOffset = req.query.offset || 0;
+
   //get all users posts (limit 9)
   const getUserPostsQuery = `
   SELECT 
@@ -268,8 +341,9 @@ export async function getUserPosts(req, res) {
     ) AS media_items
   FROM posts p
   WHERE p.user_id = $1
-  LIMIT 9;`;
-  const postData = await query(getUserPostsQuery, [req.user.userId], "getUserPosts");
+  LIMIT 9
+  OFFSET $2 ;`;
+  const postData = await query(getUserPostsQuery, [req.user.userId, reqUserOffset], "getUserPosts");
 
   // BECAUSE WE ARE ALREADY FETCHING ALL THE USER DATA IN THE api/user ROUTE
   // const userData = {
@@ -355,6 +429,11 @@ RETURN collect(follower.userId) AS orderedFollowerIds
 // /:id/edit-profile
 export async function editProfile(req, res) {
   //TODO: Complete this
+  const loggedInUserId = req.user.userId;
+  const apiId = req.params.id;
+
+  console.log("The updated User is:", req.body.updatedUser);
+  return res.json({success: true, message: "Profile updated successfully"})
 }
 
 // /:id/post/create
@@ -363,8 +442,16 @@ export async function handlePostUpload(req, res) {
   const loggedInUserId = req.user.userId;
   const apiId = req.params.id;
 
+  //mimetype: 'video/mp4' | 'image/jpeg'
+  const mimeType = req.files.length == 1
+  ? req.files[0].mimeType.split("/")[0]
+  : req.files.map((file) => file.mimeType.split("/")[0]);
+  console.log("The mime type of the media is:", mimeType);
+
+  const mediaUrl = req.files.length == 1 ? "" : new Array(req.files.length).fill("")
+
   //get the post id from this query
-  const postQuery = typeof req.body.mediaUrl == "string" ? `
+  const postQuery = req.files.length == 1 ? `
     WITH new_post AS (
       INSERT INTO posts (user_id, caption) 
       VALUES ($1, $2)
@@ -399,14 +486,28 @@ export async function handlePostUpload(req, res) {
     CROSS JOIN unnest($3::text[], $4::text[]) WITH ORDINALITY AS m(url, type, pos)
     RETURNING *;`;
     //, (SELECT _id FROM new_post) AS post_id
-  const post = await query(postQuery, [loggedInUserId, req.body.caption, req.body.mediaUrl, req.body.fileType], "createPost");
+  const post = await query(postQuery, [loggedInUserId, req.body.caption, mediaUrl, mimeType], "createPost");
 
   //create the node for the post in neo4j and create a relationship from the user to the post
   const createPostQuery = `MATCH (user:User {_id: $userId}) CREATE (post:Post {_id: $postId, created_at: datetime()}) CREATE (user)-[:POSTED]->(post) RETURN post;`;
   const neo4jPost = await neo4jQuery(createPostQuery, {userId: loggedInUserId, postId: post[0].post_id}, "createPost");
 
   return { success: true, message: "Post uploaded successfully", post: post }
-  // res.json({ success: true, message: "Post uploaded successfully", post: post })
+}
+
+// /:id/save-viewed-posts
+export async function saveViewedPosts(req, res) {
+  const saveViewedPostsQuery = `
+  INSERT INTO usersviewedposts (user_id, post_id)
+  VALUES ($1, unnest($2::uuid[]))
+  ON CONFLICT DO NOTHING
+  RETURNING post_id;
+  `;
+  const savedPosts = await query(saveViewedPostsQuery, [req.user.userId, req.body.viewedPosts], "saveViewedPosts")
+  if(savedPosts) {
+    return res.json({ success: true, savedPosts: savedPosts })
+  }
+  return res.json({ success: false, savedPosts: [] })
 }
 
 //0f9214c2-2cd3-4f06-8f06-d5b1ff521419

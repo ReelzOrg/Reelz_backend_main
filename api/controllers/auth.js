@@ -50,7 +50,7 @@ export async function loginUser(req, res) {
 }
 
 export async function registerUser(req, res) {
-  //look for the user in the database.
+  // ADD A BLOOM FILTER HERE BEFORE THE DATABASE CHECK FOR THE USERNAME
   const existingUser = await query(`SELECT * FROM users WHERE email = $1 LIMIT 1;`, [req.body.email], "searchByEmail");
   const existingUserName = await query(`SELECT * FROM users WHERE username = $1 LIMIT 1;`, [req.body.username], "searchByUsername");
 

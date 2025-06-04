@@ -41,7 +41,7 @@ if(process.env.NODE_ENV == "production") {
 app.get("/", async (req, res) => {
   //fetch all the latests posts and storise by users following list
   const result = await query("SELECT * FROM users");
-  res.json({users: result.rows && result.rows[0]})
+  res.json(result)
 });
 
 

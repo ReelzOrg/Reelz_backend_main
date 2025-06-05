@@ -1,20 +1,24 @@
-import fs from 'fs';
-import path from 'path';
 import express from 'express';
 import multer from 'multer';
 
 import { editProfile, getNetworkList, getUserBasicData, getUserFeed, getUserPosts, getUserProfile, handleFollow, handlePostUpload, handleUnFollow, saveViewedPosts } from '../controllers/userData.js';
 // import { authenticateToken, checkUserAuthorization } from "../../utils/index.js"
 import authenticateToken from "../../utils/authenticateToken.js";
-import checkUserAuthorization from "../../utils/checkUserAuthorization.js"
-import { getMultipleSignedUrls, getS3SignedUrl } from '../controllers/uploadToS3.js';
-import { query } from "../../dbFuncs/pgFuncs.js"
+import checkUserAuthorization from "../../utils/checkUserAuthorization.js";
+import { query } from "../../dbFuncs/pgFuncs.js";
 import handleFileUpload from '../../utils/handleFileUpload.js';
 
 // /api/user
 const router = express.Router();
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination: function (req, file, cb) {
+      cb(null, 'temp/userPosts/');
+    },
+    filename: function (req, file, cb) {
+      cb(null, Date.now() + '-' + file.originalname);
+    }
+  }),
   limits: { fileSize: 500 * 1024 * 1024 }, //500MB limit
   // fileFilter
 });
@@ -42,10 +46,6 @@ router.post("/:id/edit-profile", authenticateToken, checkUserAuthorization, edit
 
 //create a function for this an move this to userData.js
 router.post("/:id/save-post-media", authenticateToken, checkUserAuthorization, upload.array("mediaFiles", 10), async (req, res) => {
-  // console.log("\n\nThe request body is:");
-  // console.log(req.body);
-  // console.log("\n\nThe request files are:");
-  // console.log(req.files);
   // [
   //   {
   //     fieldname: 'mediaFiles',
@@ -62,14 +62,11 @@ router.post("/:id/save-post-media", authenticateToken, checkUserAuthorization, u
 
   //create a post in the database, update post count, & insert a blank media_url in the media table
   const getPostMediaData = await handlePostUpload(req, res);
-  if(getPostMediaData.success == false) {
-    return res.json(getPostMediaData);
-  }
+  if(getPostMediaData.success == false) return res.json(getPostMediaData);
 
   const mediaPath = req.files.length == 1
   ? `userPosts/${req.user.userId}/${getPostMediaData.post[0].post_id}/${req.files[0].originalname}`
   : req.files.map((file) => `userPosts/${req.user.userId}/${getPostMediaData.post[0].post_id}/${file.originalname}`);
-  // console.log("the media path is:", mediaPath);
 
   const x = await handleFileUpload(req, res, mediaPath);
 

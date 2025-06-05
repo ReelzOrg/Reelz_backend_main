@@ -1,3 +1,4 @@
+import fs from 'fs';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { Readable } from 'stream'; // Node.js built-in stream utility
 import multer from "multer";
@@ -18,20 +19,19 @@ export default async function handleFileUpload(req, res, filePath) {
 
 	try {
     for (const [index, file] of req.files.entries()) {
-      // Create a readable stream from the file buffer
-      const readableStream = new Readable();
-      readableStream.push(file.buffer);
-      readableStream.push(null);
+      const fileStream = fs.createReadStream(file.path);
+      // const readableStream = new Readable();
+      // readableStream.push(file.buffer);
+      // readableStream.push(null);
 
       // Determine the S3 key for the current file.
-      // The 'filePath' argument can be a single string (for one file) 
-      // or an array of strings (for multiple files).
+      // The 'filePath' argument can be a single string or an array of strings (for multiple files).
       const currentS3Key = Array.isArray(filePath) ? filePath[index] : filePath;
 
       const command = new PutObjectCommand({
 				Bucket: "reelzapp",
 				Key: currentS3Key, // Use the S3 key specific to this file
-				Body: readableStream,
+				Body: fileStream,
 				ContentLength: file.size, // Explicitly set ContentLength
 				ContentType: file.mimetype, // Corrected property name to mimetype
 				// ACL: "public-read",
@@ -39,8 +39,8 @@ export default async function handleFileUpload(req, res, filePath) {
       await s3.send(command);
 
       uploadedFiles.push({s3Key: currentS3Key, s3Location: `https://reelzapp.s3.amazonaws.com/${currentS3Key}`});
+      fs.unlinkSync(file.path);
     }
-
     // console.log('Multiple files uploaded to S3:', uploadedFiles);
     return {
 			success: true,

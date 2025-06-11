@@ -1,12 +1,13 @@
 import express from 'express';
 import multer from 'multer';
 
-import { editProfile, getNetworkList, getUserBasicData, getUserFeed, getUserPosts, getUserProfile, handleFollow, handlePostUpload, handleUnFollow, saveViewedPosts } from '../controllers/userData.js';
+import { editProfile, getNetworkList, getUserBasicData, getUserFeed, getUserPosts, getUserProfile, handleFollow, handlePostUpload, handleUnFollow, processMedia, saveViewedPosts } from '../controllers/userData.js';
 // import { authenticateToken, checkUserAuthorization } from "../../utils/index.js"
 import authenticateToken from "../../utils/authenticateToken.js";
 import checkUserAuthorization from "../../utils/checkUserAuthorization.js";
 import { query } from "../../dbFuncs/pgFuncs.js";
-import handleFileUpload from '../../utils/handleFileUpload.js';
+import { getS3SignedUrl, getMultipleSignedUrls } from "../controllers/uploadToS3.js";
+// import handleFileUpload from '../../utils/handleFileUpload.js';
 
 // /api/user
 const router = express.Router();
@@ -45,7 +46,7 @@ router.get("/:id/following", authenticateToken, checkUserAuthorization, (req, re
 router.post("/:id/edit-profile", authenticateToken, checkUserAuthorization, editProfile);
 
 //create a function for this an move this to userData.js
-router.post("/:id/save-post-media", authenticateToken, checkUserAuthorization, upload.array("mediaFiles", 10), async (req, res) => {
+router.post("/:id/save-post-media", authenticateToken, checkUserAuthorization, async (req, res) => {
   // [
   //   {
   //     fieldname: 'mediaFiles',
@@ -56,31 +57,34 @@ router.post("/:id/save-post-media", authenticateToken, checkUserAuthorization, u
   //     size: 18655325
   //   },
   // ]
-  if (!req.files || req.files.length === 0) {
-    return res.status(400).json({ message: 'No files provided.' });
-  }
+  console.log("THE FILES DATA IS:");
+  console.log(req.body.fileName, req.body.fileType, req.body.caption, req.body.mediaUrl);
+  // if (!req.files || req.files.length === 0) {
+  //   return res.status(400).json({ message: 'No files provided.' });
+  // }
 
   //create a post in the database, update post count, & insert a blank media_url in the media table
   const getPostMediaData = await handlePostUpload(req, res);
   if(getPostMediaData.success == false) return res.json(getPostMediaData);
 
-  const mediaPath = req.files.length == 1
-  ? `userPosts/${req.user.userId}/${getPostMediaData.post[0].post_id}/${req.files[0].originalname}`
-  : req.files.map((file) => `userPosts/${req.user.userId}/${getPostMediaData.post[0].post_id}/${file.originalname}`);
+  const mediaPath = typeof req.body.fileName == "string"
+  ? `userPosts/${req.user.userId}/${getPostMediaData.post[0].post_id}/${req.body.fileName}`
+  : req.body.fileName.map((name) => `userPosts/${req.user.userId}/${getPostMediaData.post[0].post_id}/${name}`);
 
-  const x = await handleFileUpload(req, res, mediaPath);
+  //USE IF YOU WANT TO UPLOAD THE FILE FROM THE SERVER
+  // const x = await handleFileUpload(req, res, mediaPath);
 
-  // let x = typeof req.body.fileType == "string"
-  // ? await getS3SignedUrl(res, mediaPath, req.body.fileType)
-  // : await getMultipleSignedUrls(res, "reelzapp", mediaPath, req.body.fileType);
+  let x = typeof req.body.fileType == "string"
+  ? await getS3SignedUrl(res, mediaPath, req.body.fileType)
+  : await getMultipleSignedUrls(res, "reelzapp", mediaPath, req.body.fileType);
 
   if(x && x.success) {
-    console.log("The uploaded files", x.uploadedFiles);
-    console.log("The list of uploaded files:", x.uploadedFiles.map((singleFile) => singleFile.s3Location));
+    console.log("The uploaded files", x.uploadURL);
+    console.log("The list of uploaded files:", x.fileURL);
     //since the above query sets a blank url in the media table
     //we are just adding the media_url but still have uploaded the media to s3
     //this will be done by frontend
-    const updateMediaQuery = req.files.length == 1
+    const updateMediaQuery = typeof req.body.fileName == "string"
     ? `UPDATE media SET media_url = $1 WHERE _id = $2;`
     : `UPDATE media AS m
       SET media_url = u.media_url
@@ -90,13 +94,14 @@ router.post("/:id/save-post-media", authenticateToken, checkUserAuthorization, u
       ) AS u(media_url, id)
       WHERE m._id = u.id
       RETURNING m.*;`;
-    const result = req.files.length == 1
-    ? await query(updateMediaQuery, [x.uploadedFiles[0].s3Location, getPostMediaData.post[0]._id], "updateMediaURL")
-    : await query(updateMediaQuery, [x.uploadedFiles.map((singleFile) => singleFile.s3Location), getPostMediaData.post.map((singleMedia) => singleMedia._id)], "updateMediaURLs");
+    const result = typeof req.body.fileName == "string"
+    ? await query(updateMediaQuery, [x.fileURL, getPostMediaData.post[0]._id], "updateMediaURL")
+    : await query(updateMediaQuery, [x.fileURL.map((singleFile) => singleFile), getPostMediaData.post.map((singleMedia) => singleMedia._id)], "updateMediaURLs");
   }
   return res.json(x);
 });
-router.post("/:id/save-viewed-posts", authenticateToken, checkUserAuthorization, saveViewedPosts)
+router.post("/:id/save-viewed-posts", authenticateToken, checkUserAuthorization, saveViewedPosts);
+router.post("/:id/process-media", authenticateToken, checkUserAuthorization, upload.array("mediaFiles", 10), processMedia);
 // router.post("/:id/post/create", authenticateToken, checkUserAuthorization, handlePostUpload);
 
 export default router;

@@ -63,7 +63,7 @@ export async function getMultipleSignedUrls(res, bucketName, fileKeys, fileTypes
   );
 
   // console.log("These are the urls of multiple uplaod to s3:", urls);
-  return { success: true, uploadURLs: urls, fileURLs: fileKeys.map((key) => `https://reelzapp.s3.us-east-1.amazonaws.com/${key}`)  };
+  return { success: true, uploadURL: urls, fileURL: fileKeys.map((key) => `https://reelzapp.s3.us-east-1.amazonaws.com/${key}`)  };
   // return res.json({ success: true, uploadURLs: urls, fileURLs: fileKeys.map((key) => `https://reelzapp.s3.us-east-1.amazonaws.com/${key}`)  });
 
   // return urls;

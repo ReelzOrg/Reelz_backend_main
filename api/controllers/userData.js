@@ -1,4 +1,6 @@
-// import { driver, neo4jQuery, ogm, query } from '../../utils/connectDB.js';
+import path from "path";
+import fs from "fs";
+
 import { driver, neo4jQuery, ogm } from "../../dbFuncs/neo4jFuncs.js";
 import { query } from "../../dbFuncs/pgFuncs.js";
 
@@ -443,15 +445,13 @@ export async function handlePostUpload(req, res) {
   const apiId = req.params.id;
 
   //mimetype: 'video/mp4' | 'image/jpeg'
-  const mimeType = req.files.length == 1
-  ? req.files[0].mimeType.split("/")[0]
-  : req.files.map((file) => file.mimeType.split("/")[0]);
+  const mimeType = typeof req.body.fileType == "string" ? req.body.fileType.split("/")[0] : req.body.fileType.map((file) => file.split("/")[0]);
   console.log("The mime type of the media is:", mimeType);
 
-  const mediaUrl = req.files.length == 1 ? "" : new Array(req.files.length).fill("")
+  const mediaUrl = typeof req.body.fileType == "string" ? "" : new Array(req.body.fileType.length).fill("")
 
   //get the post id from this query
-  const postQuery = req.files.length == 1 ? `
+  const postQuery = typeof req.body.fileType == "string" ? `
     WITH new_post AS (
       INSERT INTO posts (user_id, caption) 
       VALUES ($1, $2)
@@ -510,8 +510,163 @@ export async function saveViewedPosts(req, res) {
   return res.json({ success: false, savedPosts: [] })
 }
 
-//0f9214c2-2cd3-4f06-8f06-d5b1ff521419
-//https://reelzapp.s3.us-east-1.amazonaws.com/userPosts/bf5bd32d-d037-411d-9e5d-6323cc6199ca/post_1000000040
+//------------------------------------------------------------------------
+//                         MEDIA PROCESSING FUNCTIONS
+//------------------------------------------------------------------------
+//
+// Define image resolutions
+const IMAGE_RESOLUTIONS = [
+  { width: 1080, height: 1350, suffix: 'large' },
+  { width: 1280, height: 720, suffix: 'medium' },
+  { width: 640, height: 360, suffix: 'small' },
+  { width: 200, height: 200, suffix: 'thumbnail' }, // For square thumbnails
+];
 
-//7309bd33-0243-4da4-80f7-2e74c8326436
-//https://reelzapp.s3.us-east-1.amazonaws.com/userPosts/bf5bd32d-d037-411d-9e5d-6323cc6199ca/post_1000000039
+const IMAGE_RESOLUTIONS2 = {
+  // Profile Photos (square for circular display)
+  profile: [
+    { width: 600, height: 600, suffix: '600x600' }, // High-res for large displays/future
+    { width: 320, height: 320, suffix: '320x320' }, // Instagram's recommended base, covers 3x for 90px
+  ],
+  // Standard Posts (images in main feed)
+  post: [
+    { width: 1080, height: 1350, suffix: '1080x1350_4x5' }, // Vertical (Portrait) - Most common
+    { width: 1080, height: 1080, suffix: '1080x1080_1x1' }, // Square - Classic
+    { width: 1080, height: 566, suffix: '1080x566_1.91x1' }, // Landscape (Horizontal)
+    { width: 640, height: 800, suffix: '640x800_4x5' },   // Medium res for faster loading or lower-res displays
+    { width: 200, height: 250, suffix: '200x250_thumb' }, // Small thumbnail for feeds/grids (4:5 aspect ratio)
+  ],
+  // Stories / Reels Thumbnails (if you generate one for the grid from a 9:16 source)
+  reel_thumbnail: [
+    { width: 600, height: 1067, suffix: '600x1067_thumb_9x16_preview' }, // A preview for full-screen vertical content
+    { width: 300, height: 400, suffix: '300x400_thumb_3x4_preview' }, // Common smaller preview for some feeds
+    { width: 200, height: 200, suffix: '200x200_thumb_1x1_preview' }, // Classic square thumbnail if needed
+  ],
+};
+
+// Define video resolutions (example, adjust as needed)
+const VIDEO_RESOLUTIONS = [
+  { resolution: '1920x1080', suffix: '1080p', bitrate: '5M' },
+  { resolution: '1280x720', suffix: '720p', bitrate: '2.5M' },
+  { resolution: '640x360', suffix: '360p', bitrate: '1M' },
+];
+
+const VIDEO_RESOLUTIONS2 = {
+  // Standard Posts (videos in main feed)
+  post: [
+    // Note: The input video might not perfectly match these aspect ratios.
+    // ffmpeg's 'autopad' or 'scale' filters can be used to handle this.
+    // 'fit: sharp.fit.inside' for images is equivalent to 'scale' with 'force_original_aspect_ratio=decrease' for video.
+    // 'autopad' will add black bars if aspect ratio is changed.
+    { resolution: '1080x1350', suffix: '1080p_4x5', bitrate: '4M' }, // Vertical (Portrait)
+    { resolution: '1080x1080', suffix: '1080p_1x1', bitrate: '3.5M' }, // Square
+    { resolution: '1080x608', suffix: '1080p_16x9', bitrate: '3M' }, // Landscape (16:9 is common for video)
+    { resolution: '720x900', suffix: '720p_4x5', bitrate: '2M' }, // Medium res for faster loading
+    { resolution: '640x800', suffix: '640p_4x5', bitrate: '1.5M' }, // Lower res for slower networks
+  ],
+  // Full Page Videos / Reels / Stories
+  reel: [
+    { resolution: '1080x1920', suffix: '1080p_9x16', bitrate: '5M' }, // Full HD vertical
+    { resolution: '720x1280', suffix: '720p_9x16', bitrate: '2.5M' }, // HD vertical
+    { resolution: '480x854', suffix: '480p_9x16', bitrate: '1M' }, // SD vertical
+  ],
+};
+
+// THIS WILL GO IN A SEPARATE MICROSERVICE
+export async function processMedia(req, res) {
+  console.log("The S3 URLS to process are:")
+  console.log(req.body.toProcessUrls);
+
+  // if (!req.files || req.files.length === 0) {
+  //   return res.status(400).send('No files uploaded.');
+  // }
+
+  const uploadedFileUrls = [];
+  const processingPromises = [];
+
+  return res.status(200).json({ success: true, message: "Test" });
+
+  /*
+  for (const file of req.files) {
+    const originalFilePath = file.path;
+    const originalFileName = file.originalname;
+    const fileExtension = path.extname(originalFileName).toLowerCase();
+    const baseName = path.basename(originalFileName, fileExtension);
+
+    try {
+      if (file.mimetype.startsWith('image/')) {
+        //review this code
+        for (const resConfig of IMAGE_RESOLUTIONS) {
+          const outputFileName = `${baseName}_${resConfig.suffix}.webp`; // Using webp for better compression
+          const outputPath = path.join('uploads', outputFileName);
+
+          const imageProcessingPromise = sharp(originalFilePath)
+            .resize(resConfig.width, resConfig.height, { fit: sharp.fit.inside, withoutEnlargement: true })
+            .webp({ quality: 80 }) // Adjust quality as needed
+            .toFile(outputPath)
+            .then(async () => {
+              const s3Key = `images/${baseName}/${outputFileName}`;
+              await uploadToS3(outputPath, s3Key, 'image/webp');
+              uploadedFileUrls.push(`https://${S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`);
+              fs.unlinkSync(outputPath); // Clean up temp file
+            });
+          processingPromises.push(imageProcessingPromise);
+        }
+      } else if(file.mimeType.startsWith("video/")) {
+        for (const resConfig of VIDEO_RESOLUTIONS) {
+          const outputFileName = `${baseName}_${resConfig.suffix}.mp4`;
+          const outputPath = path.join('uploads', outputFileName);
+
+          const videoProcessingPromise = new Promise((resolve, reject) => {
+            ffmpeg(originalFilePath)
+              .output(outputPath)
+              .videoCodec('libx264')
+              .audioCodec('aac')
+              .size(resConfig.resolution)
+              .autopad() // Add black borders to maintain aspect ratio if scaling
+              .outputOptions([
+                `-b:v ${resConfig.bitrate}`, // Video bitrate
+                '-preset fast', // Encoding speed vs. compression ratio
+                '-crf 28', // Constant Rate Factor (quality setting, lower is better quality)
+              ])
+              .on('end', async () => {
+                try {
+                  const s3Key = `videos/${baseName}/${outputFileName}`;
+                  await uploadToS3(outputPath, s3Key, 'video/mp4');
+                  uploadedFileUrls.push(`https://${S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`);
+                  fs.unlinkSync(outputPath); // Clean up temp file
+                  resolve();
+                } catch (s3Err) {
+                  console.error('S3 upload error for video:', s3Err);
+                  reject(s3Err);
+                }
+              })
+              .on('error', (err) => {
+                console.error(`Error processing video ${originalFileName} to ${resConfig.resolution}:`, err);
+                reject(err);
+              })
+              .run();
+          });
+          processingPromises.push(videoProcessingPromise);
+        }
+      }
+    } catch (error) {
+      console.error('Error processing media:', error);
+    } finally {
+      // Delete the original uploaded temp file
+      if (fs.existsSync(originalFilePath)) {
+        fs.unlinkSync(originalFilePath);
+      }
+    }
+  }
+
+  // Wait for all processing and S3 uploads to complete
+  try {
+    await Promise.all(processingPromises);
+    res.status(200).json({ message: 'Files processed and uploaded successfully!', urls: uploadedFileUrls });
+  } catch (error) {
+    console.error('One or more processing/upload tasks failed:', error);
+    res.status(500).json({ error: 'Failed to process and upload some files.' });
+  }
+  */
+}

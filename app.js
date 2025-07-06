@@ -9,7 +9,7 @@ import { dirname } from 'path';
 
 // import { query, closePool } from './utils/connectDB.js';
 import { query, closePool } from './dbFuncs/pgFuncs.js';
-import { authRouter, userDataRouter, searchRouter } from './api/routes/index.js';
+import { authRouter, userDataRouter, searchRouter, chatRouter } from './api/routes/index.js';
 import { initTypesense, syncTypeSense } from './dbFuncs/typesenseFuncs.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -21,21 +21,22 @@ const PORT = process.env.PORT_NUM || 5000;
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(cors({origin:'*'}));
-app.set("view engine", "ejs");
-app.set('views', path.join(__dirname, 'views')); // Set the views directory
+// app.set("view engine", "ejs");
+// app.set('views', path.join(__dirname, 'views')); // Set the views directory
 app.use(bodyParser.urlencoded({extended: true}));
 
 app.use("/api/auth", authRouter);
 app.use("/api/user", userDataRouter);
+app.use("/api/llm", chatRouter);
 app.use("/api", searchRouter);
 
 //TypeSence Functions ---------------------------
-await initTypesense();
-await syncTypeSense();
+// await initTypesense();
+// await syncTypeSense();
 
-if(process.env.NODE_ENV == "production") {
-  setInterval(syncTypeSense, 60 * 60 * 1000); // Hourly
-}
+// if(process.env.NODE_ENV == "production") {
+//   setInterval(syncTypeSense, 60 * 60 * 1000); // Hourly
+// }
 // ----------------------------------------------
 
 app.get("/", async (req, res) => {

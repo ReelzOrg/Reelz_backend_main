@@ -53,7 +53,7 @@ router.post("/:id/save-post-media", authenticateToken, checkUserAuthorization, a
   //     originalname: 'post_1000000045',
   //     encoding: '7bit',
   //     mimetype: 'video/mp4',
-  //     buffer: <Buffer 00 00 00 1c 66 74 79 70 69 73 6f 35 00 00 02 00 69 73 6f 35 69 73 6f 36 6d 70 34 31 00 00 04 e1 6d 6f 6f 76 00 00 00 6c 6d 76 68 64 00 00 00 00 00 00 ... 18655275 more bytes>,
+  //     buffer: <Buffer 00 00 00 1c 66 74 79 70 69 73 6f ... 18655275 more bytes>,
   //     size: 18655325
   //   },
   // ]
@@ -98,10 +98,26 @@ router.post("/:id/save-post-media", authenticateToken, checkUserAuthorization, a
     ? await query(updateMediaQuery, [x.fileURL, getPostMediaData.post[0]._id], "updateMediaURL")
     : await query(updateMediaQuery, [x.fileURL.map((singleFile) => singleFile), getPostMediaData.post.map((singleMedia) => singleMedia._id)], "updateMediaURLs");
   }
-  return res.json(x);
+  return res.json({...x, post_id: getPostMediaData.post[0].post_id});
 });
 router.post("/:id/save-viewed-posts", authenticateToken, checkUserAuthorization, saveViewedPosts);
-router.post("/:id/process-media", authenticateToken, checkUserAuthorization, upload.array("mediaFiles", 10), processMedia);
+router.post("/:id/process-media", authenticateToken, checkUserAuthorization, (req, res) => {
+  // processMedia()
+
+  //perform some validation checks. See if the urls are actually valid s3 urls.
+  //instead of adding the "processing" status here how about just put the processing status when you add the post
+  //in the database? this might not be a real proper status but it will save a database update
+
+  //For now make a HTTP request to the processing servie but later add a message queue to handle this
+  //we are not "awaiting" the response from the processing service
+  const res = fetch(`http://localhost:5000/api/user/${req.user.userId}/process-media`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(req.body),
+  });
+});
 // router.post("/:id/post/create", authenticateToken, checkUserAuthorization, handlePostUpload);
 
 export default router;

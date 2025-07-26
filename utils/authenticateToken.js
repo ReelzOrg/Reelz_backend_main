@@ -1,7 +1,7 @@
 import 'dotenv/config.js';
 import jwt from 'jsonwebtoken';
 
-//the req.user has the userId and username
+//the req.user has the userId
 export default function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const jwtToken = authHeader && authHeader.split(' ')[1];
@@ -14,7 +14,7 @@ export default function authenticateToken(req, res, next) {
     if (err) {
       return res.status(403).json({ message: 'Forbidden: Invalid jwt token' });
     }
-    req.user = decoded; // Attach decoded payload (e.g., user ID) to request object
+    req.user = decoded; // Attach decoded user ID to request object
     next();
   });
 }

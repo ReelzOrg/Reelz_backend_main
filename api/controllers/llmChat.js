@@ -2,6 +2,12 @@ import path from 'path';
 import grpc from "@grpc/grpc-js";
 import protoLoader from "@grpc/proto-loader";
 
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 const PROTO_PATH = path.resolve(__dirname, '../../protos/llm_service.proto');
 
 const packageDefinition = protoLoader.loadSync(PROTO_PATH, {

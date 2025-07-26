@@ -1,7 +1,7 @@
 import express from 'express';
 
-import authenticateToken from '../../utils/authenticateToken';
-import { llmChatClient } from '../controllers/llmChat';
+import authenticateToken from '../../utils/authenticateToken.js';
+import { llmChatClient } from '../controllers/llmChat.js';
 
 // /api/llm
 const router = express.Router();

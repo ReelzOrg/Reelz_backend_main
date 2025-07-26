@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 
-import { editProfile, getNetworkList, getUserBasicData, getUserFeed, getUserPosts, getUserProfile, handleFollow, handlePostUpload, handleUnFollow, processMedia, saveViewedPosts } from '../controllers/userData.js';
+import { editProfile, getNetworkList, getUserBasicData, getUserFeed, getUserPosts, getUserProfile, handleFollow, handlePostUpload, handleUnFollow, saveViewedPosts } from '../controllers/userData.js';
 // import { authenticateToken, checkUserAuthorization } from "../../utils/index.js"
 import authenticateToken from "../../utils/authenticateToken.js";
 import checkUserAuthorization from "../../utils/checkUserAuthorization.js";
@@ -110,7 +110,7 @@ router.post("/:id/process-media", authenticateToken, checkUserAuthorization, (re
 
   //For now make a HTTP request to the processing servie but later add a message queue to handle this
   //we are not "awaiting" the response from the processing service
-  const res = fetch(`http://localhost:5000/api/user/${req.user.userId}/process-media`, {
+  const response = fetch(`http://localhost:5000/api/user/${req.user.userId}/process-media`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

@@ -1,6 +1,7 @@
 import path from 'path';
 import grpc from "@grpc/grpc-js";
 import protoLoader from "@grpc/proto-loader";
+import { v4 as uuidv4 } from 'uuid';
 
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
@@ -22,11 +23,10 @@ const llmProtoDescriptor = grpc.loadPackageDefinition(packageDefinition).llm;
 const client = new llmProtoDescriptor.LLMService('localhost:50051', grpc.credentials.createInsecure());
 
 export async function llmChatClient(req, res) {
-  let sessionId = req.body.sessionId;
   const grpcRequest = {
     prompt: req.body.prompt,
     model: req.body.model || 'gemma3:4b',
-    session_id: sessionId,
+    session_id: req.body.sessionId || uuidv4(), //Create a UUID if client doesnt send it
     // We are not handling the chat histiry here, it will be handled in the python server
     // history: req.body.history ? req.body.history.map(msg => ({role: msg.role, content: msg.content})) : []
   };
@@ -36,7 +36,7 @@ export async function llmChatClient(req, res) {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
-    'X-Session-ID': sessionId // Send session ID back to client (or don't)
+    'X-Session-ID': grpcRequest.session_id // Send session ID back to client (or don't)
   });
 
   try {

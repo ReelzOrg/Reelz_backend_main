@@ -29,7 +29,9 @@ export async function getUserBasicData(req, res) {
 export async function getUserProfile(req, res) {
   //req.user is the user that is logged in
   const reqUserUsername = req.params.username;
-  const reqUserOffset = req.query.offset || 0;
+  const page = req.query.page || 0;
+  const limit = 9;
+  const reqUserOffset = page * limit;
   
   const userProfileQuery = `SELECT * FROM users WHERE username = $1 LIMIT 1;`;
   const requestedUser = await query(userProfileQuery, [reqUserUsername], "getUserByUsername");
@@ -48,6 +50,9 @@ export async function getUserProfile(req, res) {
       bio: requestedUser[0].bio
     }
 
+    // Maybe remove this and we dont let the user search for himself. Hence the user will only be able to see his
+    // posts from his profile page.
+    // So we might have to change the typesense logic a little to filter the users own account
     if(requestedUser[0]._id === req.user.userId) {
       // no further checks necessary if it is the user's own account
       // send the userData and also ***fetch all the posts***
@@ -69,9 +74,9 @@ export async function getUserProfile(req, res) {
         ) AS media_items
       FROM posts p
       WHERE p.user_id = $1
-      LIMIT 9
-      OFFSET $2;`;
-      const postData = await query(getUserPostsQuery, [req.user.userId, reqUserOffset], "getUserPosts");
+      LIMIT $2
+      OFFSET $3;`;
+      const postData = await query(getUserPostsQuery, [req.user.userId, limit, reqUserOffset], "getUserPosts");
       return res.json({ success: true, user: {...userData, posts: postData, isUserAcc: true} })
     }
 
@@ -105,8 +110,9 @@ export async function getUserProfile(req, res) {
         ) AS media_items
       FROM posts p
       WHERE p.user_id = $1
-      LIMIT 9;`;
-      const postData = await query(getUserPostsQuery, [req.user.userId], "getUserPosts");
+      LIMIT $2
+      OFFSET $3;`;
+      const postData = await query(getUserPostsQuery, [req.user.userId, limit, reqUserOffset], "getUserPosts");
       return res.json({ success: true, user: {...userData, isUserAcc: false, followStatus: followStatus}, posts: postData });
     }
     //if the requested user is private and the loggedin user have requested to follow
@@ -319,7 +325,10 @@ export async function getUserPosts(req, res) {
   // const getUserByIdQuery = `SELECT * FROM users WHERE _id = $1 LIMIT 1;`;
   // const user = await query(getUserByIdQuery, [req.user.userId], "getuserById");
 
-  const reqUserOffset = req.query.offset || 0;
+  const page = req.query.page || 0;
+  const limit = 9;
+
+  const reqUserOffset = page * limit;
 
   //get all users posts (limit 9)
   const getUserPostsQuery = `
@@ -340,25 +349,11 @@ export async function getUserPosts(req, res) {
     ) AS media_items
   FROM posts p
   WHERE p.user_id = $1
-  LIMIT 9
-  OFFSET $2 ;`;
-  const postData = await query(getUserPostsQuery, [req.user.userId, reqUserOffset], "getUserPosts");
+  LIMIT $2
+  OFFSET $3 ;`;
+  const postData = await query(getUserPostsQuery, [req.user.userId, limit, reqUserOffset], "getUserPosts");
 
-  // BECAUSE WE ARE ALREADY FETCHING ALL THE USER DATA IN THE api/user ROUTE
-  // const userData = {
-  //   _id: user[0]._id,
-  //   username: user[0].username,
-  //   first_name: user[0].first_name,
-  //   last_name: user[0].last_name,
-  //   follower_count: user[0].follower_count,
-  //   following_count: user[0].following_count,
-  //   post_count: user[0].post_count,
-  //   profile_picture: user[0].profile_picture,
-  //   is_private: user[0].is_private,
-  //   bio: user[0].bio
-  // }
-
-  return res.json({ success: true, /*user: userData,*/ posts: postData });
+  return res.json({ success: true, posts: postData });
 }
 
 //in the AllUserProfilePage component we get all the data of the requested user

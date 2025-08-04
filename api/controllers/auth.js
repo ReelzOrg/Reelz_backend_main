@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 
 // import { createUserWithDriver, query } from '../../utils/connectDB.js';
 import { createUserWithDriver } from '../../dbFuncs/neo4jFuncs.js';
-import { query } from '../../dbFuncs/pgFuncs.js';
+import { query, transactionQuery } from '../../dbFuncs/pgFuncs.js';
 import { verifyEmail } from '../../utils.js';
 import { syncTypeSense } from '../../dbFuncs/typesenseFuncs.js';
 
@@ -70,27 +70,37 @@ export async function registerUser(req, res) {
   const salt = await bcrypt.genSalt(10);
   const password_hash = await bcrypt.hash(req.body.password, salt);
 
-  //save the user to the database
-  const insertQuery = `
-  INSERT INTO users (username, email, password_hash, first_name, last_name, profile_picture)
-  VALUES ($1, $2, $3, $4, $5, $6)
-  RETURNING *;`
-  const values = [req.body.username, req.body.email, password_hash, req.body.first_name, req.body.last_name, req.body.imgUrl];
-  const savedUser = await query(insertQuery, values, "insertUser");
-  console.log(savedUser);
+  transactionQuery(async (client) => {
+    //save the user to the "users" table
+    const insertQuery = `
+    INSERT INTO users (username, email, password_hash, first_name, last_name, profile_picture)
+    VALUES ($1, $2, $3, $4, $5, $6)
+    RETURNING *;`
+    const values = [req.body.username, req.body.email, password_hash, req.body.first_name, req.body.last_name, req.body.imgUrl];
+    const savedUser = await client.query(insertQuery, values);
+    console.log(savedUser);
 
-  //also create a node in the NEO4J database
-  const neo4jUser = await createUserWithDriver(req.body.username, savedUser[0]._id);
-  console.log("This is the neo4j user", neo4jUser);
+    //Write to the outbox table
+    const outboxQuery = `INSERT INTO outbox (event_type, payload) VALUES ($1, $2);`
+    //Debezium is configured to create a topic name like so: app_events_${routedByValue} so
+    //the topic name in kafka would be app_events_UserCreated which should match the topic
+    //the consumer subscribes to
+    const outboxPayload = { userId: savedUser.rows[0]._id, eventType: "UserCreated" };
+    await client.query(outboxQuery, [outboxPayload.eventType, outboxPayload]);
+  })
+
+  //------------- This is now handled by Outbox pattern to avoid the duel write problem ---------------
+  // const neo4jUser = await createUserWithDriver(req.body.username, savedUser.rows[0]._id);
+  // console.log("This is the neo4j user", neo4jUser);
 
   //Sync the newly created user with typesense
-  await syncTypeSense(true, savedUser[0]._id);
+  // await syncTypeSense(true, savedUser.rows[0]._id);
+  //---------------------------------------------------------------------------------------------------
 
-  //creating a user in postgresql is more important
   if(savedUser) {
     console.log("user have been saved!");
-    const userData = {_id: savedUser[0]._id}
-    const token = jwt.sign({ userId: savedUser[0]._id }, process.env.JWT_SECRET)
+    const userData = {_id: savedUser.rows[0]._id}
+    const token = jwt.sign({ userId: savedUser.rows[0]._id }, process.env.JWT_SECRET)
     res.json({ success: true, token: token, user: userData })
   } else {
     res.json({ success: false, message: "The user was not saved to the database" })

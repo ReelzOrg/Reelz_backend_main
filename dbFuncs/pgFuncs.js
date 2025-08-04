@@ -29,3 +29,22 @@ export async function closePool() {
     console.error("Error closing pool:", error);
   }
 };
+
+/**
+ * Makes a transaction queries to execute multiple queries at the same time
+ * @param {Function} callback - An async function that receives the client and executes the specific queries
+ */
+export async function transactionQuery(callback) {
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+    await callback(client);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.log("There was ana error in the transaction", error);
+  } finally {
+    client.release();
+  }
+}

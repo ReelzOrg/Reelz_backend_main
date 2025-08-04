@@ -1,6 +1,6 @@
 import fs from 'fs';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
-import { Readable } from 'stream'; // Node.js built-in stream utility
+// import { Readable } from 'stream'; // Node.js built-in stream utility
 import multer from "multer";
 
 import { s3 } from "../api/controllers/uploadToS3.js";

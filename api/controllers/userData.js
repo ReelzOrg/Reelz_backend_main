@@ -1,5 +1,8 @@
 import { neo4jQuery } from "../../dbFuncs/neo4jFuncs.js";
 import { query } from "../../dbFuncs/pgFuncs.js";
+import { KafkaProducerManager } from "../../utils/kafka/kafkaUtils.js";
+import { v4 as uuidv4 } from 'uuid';
+import { KafkaTopics, ProducerNames } from "../../utils/kafka/types.js";
 
 /** Time decayed weight calculation for the closeness of 2 users
  * MATCH (u1:User)-[follow:FOLLOWS]->(u2:User)
@@ -500,4 +503,30 @@ export async function saveViewedPosts(req, res) {
     return res.json({ success: true, savedPosts: savedPosts })
   }
   return res.json({ success: false, savedPosts: [] })
+}
+
+// /:id/process-media
+export async function sendProcessingRquest(req, res) {
+  /**
+   * toProcessUrls: Array of urls to process
+   * uploadType: "post" | "story" | "reel"
+   * post_id: uuid
+   */
+  const { toProcessUrls, uploadType, post_id } = req.body;
+  const addDataToQueue = JSON.stringify({toProcessUrls, uploadType, post_id, timeStamp: Date.now()});
+
+  try {
+    await KafkaProducerManager.getProducer(ProducerNames.MEDIA).send({
+      topic: KafkaTopics.MEDIA_PROCESSING,
+      messages: [{
+        value: addDataToQueue,
+        headers: { 'x-trace-id': uuidv4() },
+      }]
+    });
+    console.log('Processing request sent successfully');
+    res.status(202).json({ enqueued: true });
+  } catch (error) {
+    console.error('Error sending processing request:', error);
+    res.status(500).json({ enqueued: false });
+  }
 }

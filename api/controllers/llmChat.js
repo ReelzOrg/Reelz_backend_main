@@ -19,7 +19,6 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
   oneofs: true
 });
 const llmProtoDescriptor = grpc.loadPackageDefinition(packageDefinition).llm;
-
 const client = new llmProtoDescriptor.LLMService('localhost:50051', grpc.credentials.createInsecure());
 
 export async function llmChatClient(req, res) {

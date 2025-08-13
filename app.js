@@ -11,6 +11,7 @@ import { dirname } from 'path';
 import { query, closePool } from './dbFuncs/pgFuncs.js';
 import { authRouter, userDataRouter, searchRouter, chatRouter } from './api/routes/index.js';
 import { initTypesense, syncTypeSense } from './dbFuncs/typesenseFuncs.js';
+import { KafkaProducerManager } from './utils/kafka/kafkaUtils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -49,14 +50,26 @@ app.get("/", async (req, res) => {
 // Serve static files from the 'public' directory
 // app.use(express.static(path.join(__dirname, 'public')));
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log("Server started on port: " + PORT);
 });
 
 // Close the connection pool when the server shuts down
 async function shutDownServer() {
   console.log("The server is shutting down");
+  console.log("Cleaning up all the resources...")
+
+  await KafkaProducerManager.shutdownAll();
+  console.log('Kafka producers disconnected.');
+  
   await closePool();
+  console.log('PostgreSQL connection pool closed.');
+
+  server.close(() => {
+    console.log('Server closed successfully.');
+    process.exit(0);
+  });
 }
 
-process.on('SIGINT' | 'SIGTERM', shutDownServer);
+process.on('SIGINT', shutDownServer);
+process.on('SIGTERM', shutDownServer);

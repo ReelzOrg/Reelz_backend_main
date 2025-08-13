@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 
-import { editProfile, getNetworkList, getUserBasicData, getUserFeed, getUserPosts, getUserProfile, handleFollow, handlePostUpload, handleUnFollow, saveViewedPosts } from '../controllers/userData.js';
+import { editProfile, getNetworkList, getUserBasicData, getUserFeed, getUserPosts, getUserProfile, handleFollow, handlePostUpload, handleUnFollow, saveViewedPosts, sendProcessingRquest } from '../controllers/userData.js';
 // import { authenticateToken, checkUserAuthorization } from "../../utils/index.js"
 import authenticateToken from "../../utils/authenticateToken.js";
 import checkUserAuthorization from "../../utils/checkUserAuthorization.js";
@@ -101,23 +101,9 @@ router.post("/:id/save-post-media", authenticateToken, checkUserAuthorization, a
   return res.json({...x, post_id: getPostMediaData.post[0].post_id});
 });
 router.post("/:id/save-viewed-posts", authenticateToken, checkUserAuthorization, saveViewedPosts);
-router.post("/:id/process-media", authenticateToken, checkUserAuthorization, (req, res) => {
-  // processMedia()
 
-  //perform some validation checks. See if the urls are actually valid s3 urls.
-  //instead of adding the "processing" status here how about just put the processing status when you add the post
-  //in the database? this might not be a real proper status but it will save a database update
-
-  //For now make a HTTP request to the processing servie but later add a message queue to handle this
-  //we are not "awaiting" the response from the processing service
-  const response = fetch(`http://localhost:5000/api/user/${req.user.userId}/process-media`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(req.body),
-  });
-});
+// sending processing request to kafka queue
+router.post("/:id/process-media", authenticateToken, checkUserAuthorization, sendProcessingRquest);
 // router.post("/:id/post/create", authenticateToken, checkUserAuthorization, handlePostUpload);
 
 export default router;

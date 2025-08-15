@@ -515,8 +515,11 @@ export async function sendProcessingRquest(req, res) {
   const { toProcessUrls, uploadType, post_id } = req.body;
   const addDataToQueue = JSON.stringify({toProcessUrls, uploadType, post_id, timeStamp: Date.now()});
 
+  //for now I have defined the topics and producer names in the types.js file but in production I should be creating
+  //a shared config file which contains the topic names which will be used by both the producer (this code) and the 
+  //consumer (C++ and python services)
   try {
-    await KafkaProducerManager.getProducer(ProducerNames.MEDIA).send({
+    await KafkaProducerManager.send(ProducerNames.MEDIA, {
       topic: KafkaTopics.MEDIA_PROCESSING,
       messages: [{
         value: addDataToQueue,

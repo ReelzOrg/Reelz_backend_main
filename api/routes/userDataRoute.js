@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 
-import { editProfile, getNetworkList, getUserBasicData, getUserFeed, getUserPosts, getUserProfile, handleFollow, handlePostUpload, handleUnFollow, saveViewedPosts, sendProcessingRquest } from '../controllers/userData.js';
+import { editProfile, getNetworkList, getUserBasicData, getUserFeed, getUserPosts, getUserProfile, handleFollow, handlePostUpload, handleUnFollow, saveViewedPosts, sendProcessingRequest } from '../controllers/userData.js';
 // import { authenticateToken, checkUserAuthorization } from "../../utils/index.js"
 import authenticateToken from "../../utils/authenticateToken.js";
 import checkUserAuthorization from "../../utils/checkUserAuthorization.js";
@@ -103,7 +103,7 @@ router.post("/:id/save-post-media", authenticateToken, checkUserAuthorization, a
 router.post("/:id/save-viewed-posts", authenticateToken, checkUserAuthorization, saveViewedPosts);
 
 // sending processing request to kafka queue
-router.post("/:id/process-media", authenticateToken, checkUserAuthorization, sendProcessingRquest);
+router.post("/:id/process-media", authenticateToken, checkUserAuthorization, sendProcessingRequest);
 // router.post("/:id/post/create", authenticateToken, checkUserAuthorization, handlePostUpload);
 
 export default router;

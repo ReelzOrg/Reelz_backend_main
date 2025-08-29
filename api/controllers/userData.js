@@ -506,7 +506,7 @@ export async function saveViewedPosts(req, res) {
 }
 
 // /:id/process-media
-export async function sendProcessingRquest(req, res) {
+export async function sendProcessingRequest(req, res) {
   /**
    * toProcessUrls: Array of urls to process
    * uploadType: "post" | "story" | "reel"

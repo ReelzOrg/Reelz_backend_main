@@ -3,7 +3,7 @@ import express from 'express';
 import { searchTypeSense } from '../../dbFuncs/typesenseFuncs.js';
 const router = express.Router();
 
-router.get("/search", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const result = await searchTypeSense(
       'users', //Collection name

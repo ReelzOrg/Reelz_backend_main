@@ -9,6 +9,13 @@ const pool = new pgsql.Pool({
   port: parseInt(process.env.POSTGRES_PORT || "5432"), // Default PostgreSQL port
 });
 
+/**
+ * Execute a raw SQL query with parameters. User this function for complex queries
+ * @param {string} queryStr - Raw SQL Query
+ * @param {object} params - Query parameters
+ * @param {string} name - Name of the query - for debugging
+ * @returns {Promise<object[]>} Query result
+ */
 export async function query(queryStr, params, name="default") {
   try {
     const start = Date.now();
@@ -18,6 +25,7 @@ export async function query(queryStr, params, name="default") {
     return result.rows;
   } catch(err) {
     console.error(`Database query error(${name}):`, err);
+    return [];
   }
 }
 

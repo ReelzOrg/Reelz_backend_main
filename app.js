@@ -7,11 +7,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
-// import { query, closePool } from './utils/connectDB.js';
-import { query, closePool } from './dbFuncs/pgFuncs.js';
 import { authRouter, userDataRouter, searchRouter, chatRouter } from './api/routes/index.js';
-import { initTypesense, syncTypeSense } from './dbFuncs/typesenseFuncs.js';
 import { KafkaProducerManager } from './utils/kafka/kafkaUtils.js';
+import { query, closePool } from './dbFuncs/pgFuncs.js';
+import { initTypesense, syncTypeSense, typeSenseKeepAlive } from './dbFuncs/typesenseFuncs.js';
+import { neo4jDriver } from './dbFuncs/neo4jFuncs.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -29,7 +29,7 @@ app.use(bodyParser.urlencoded({extended: true}));
 app.use("/api/auth", authRouter);
 app.use("/api/user", userDataRouter);
 app.use("/api/llm", chatRouter);
-app.use("/api", searchRouter);
+app.use("/api/search", searchRouter);
 
 //TypeSence Functions ---------------------------
 // await initTypesense();
@@ -54,19 +54,20 @@ const server = app.listen(PORT, () => {
   console.log("Server started on port: " + PORT);
 });
 
-// Close the connection pool when the server shuts down
+// Clear all the resources when the server shuts down
 async function shutDownServer() {
-  console.log("The server is shutting down");
-  console.log("Cleaning up all the resources...")
+  console.log("The server is shutting down. Cleaning up all the resources...");
 
   await KafkaProducerManager.shutdownAll();
-  console.log('Kafka producers disconnected.');
-  
   await closePool();
-  console.log('PostgreSQL connection pool closed.');
+  await neo4jDriver.close();
+  console.log("Neo4j pool closed successfully.");
+
+  typeSenseKeepAlive.destroy()
+  console.log("Typesense keep alive destroyed successfully.")
 
   server.close(() => {
-    console.log('Server closed successfully.');
+    console.log('Server stopped successfully.');
     process.exit(0);
   });
 }

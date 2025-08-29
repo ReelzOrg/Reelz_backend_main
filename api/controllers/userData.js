@@ -2,7 +2,7 @@ import { neo4jQuery } from "../../dbFuncs/neo4jFuncs.js";
 import { query } from "../../dbFuncs/pgFuncs.js";
 import { KafkaProducerManager } from "../../utils/kafka/kafkaUtils.js";
 import { v4 as uuidv4 } from 'uuid';
-import { KafkaTopics, ProducerNames } from "../../utils/kafka/types.js";
+import { ProducerNames } from "../../utils/kafka/types.js";
 
 /** Time decayed weight calculation for the closeness of 2 users
  * MATCH (u1:User)-[follow:FOLLOWS]->(u2:User)
@@ -132,8 +132,8 @@ export async function getUserFeed(req, res) {
 
   //TODO: make the frontend return the number of follows instead of quering neo4j
   const getTotalUserFollows = `MATCH (:User {_id: $loggedInUser})-[:FOLLOWS]->(f:User) RETURN count(f) AS totalFollows`;
-  const totalFollows = await neo4jQuery(getTotalUserFollows, {loggedInUser}, "getUserFollows")
-  const topLimit = parseInt(Math.ceil(parseFloat(totalFollows[0].get('totalFollows')) * 0.1));
+  const totalFollows = await neo4jQuery(getTotalUserFollows, {loggedInUser}, "getUserFollows");
+  const topLimit = totalFollows.length === 0 ? 0 : parseInt(Math.ceil(parseFloat(totalFollows[0].get('totalFollows')) * 0.1));
 
   const userFeedQuery2 = `
   // 1. Start with the user
@@ -513,20 +513,14 @@ export async function sendProcessingRquest(req, res) {
    * post_id: uuid
    */
   const { toProcessUrls, uploadType, post_id } = req.body;
-  const addDataToQueue = JSON.stringify({toProcessUrls, uploadType, post_id, timeStamp: Date.now()});
+  const addDataToQueue = {toProcessUrls, uploadType, post_id, timeStamp: Date.now()};
 
   //for now I have defined the topics and producer names in the types.js file but in production I should be creating
   //a shared config file which contains the topic names which will be used by both the producer (this code) and the 
   //consumer (C++ and python services)
   try {
-    await KafkaProducerManager.send(ProducerNames.MEDIA, {
-      topic: KafkaTopics.MEDIA_PROCESSING,
-      messages: [{
-        value: addDataToQueue,
-        headers: { 'x-trace-id': uuidv4() },
-      }]
-    });
-    console.log('Processing request sent successfully');
+    KafkaProducerManager.send(ProducerNames.MEDIA, addDataToQueue);
+    console.log('Processing request sent successfully -', ProducerNames.MEDIA.topic);
     res.status(202).json({ enqueued: true });
   } catch (error) {
     console.error('Error sending processing request:', error);

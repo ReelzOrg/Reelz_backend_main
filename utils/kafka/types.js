@@ -1,7 +1,8 @@
-export const ProducerNames = {
-  MEDIA: 'media',
-}
+import { mediaProcessingSchema } from "./schemas"
 
-export const KafkaTopics = {
-  MEDIA_PROCESSING: 'media_processing'
+export const ProducerNames = {
+  MEDIA: {
+    schema: mediaProcessingSchema,
+    topic: 'media_processing'
+  },
 }

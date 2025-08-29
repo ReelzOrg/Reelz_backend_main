@@ -1,4 +1,24 @@
 services:
+  neo4jDB: #The name here is changed from neo4j for future connectivity with kubernetes
+           #https://stackoverflow.com/a/77261518
+    image: neo4j:latest
+    restart: unless-stopped # Restart policy
+    ports:
+      - "7687:7687" # Bolt protocol
+      - "7474:7474" # HTTP (Neo4j Browser)
+    environment:
+      NEO4J_AUTH: "${NEO4J_USERNAME}/${NEO4J_PASSWORD}"
+      # NEO4J_server_bolt_listen_address: "0.0.0.0:7687"
+      # NEO4J_server_http_listen_address: "0.0.0.0:7474"
+      # NEO4J_dbms_connector_bolt_address: "0.0.0.0:7687"
+      # NEO4J_dbms_connector_bolt_listen_address: "0.0.0.0"
+      # NEO4J_dbms_connector_http_address: "0.0.0.0:7474"
+      # NEO4J_dbms_connector_http_listen_address: "0.0.0.0"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_plugins:/plugins # For plugins like APOC
+    
   searxng:
     image: searxng/searxng:latest
     restart: unless-stopped
@@ -37,6 +57,17 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+  
+  schema-registry:
+    image: confluentinc/cp-schema-registry
+    container_name: schema-registry
+    ports:
+      - "8081:8081"
+    depends_on: [kafka]
+    environment:
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
 
   connect:
     image: debezium/connect:3.0.0.Final
@@ -54,3 +85,6 @@ services:
 
 volumes:
   searxng_data:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_plugins:

@@ -1,15 +1,20 @@
 import 'dotenv/config.js'
 import TypeSense from 'typesense';
+import http from 'http';
+
 import { query } from './pgFuncs.js';
 
-let client = new TypeSense.Client({
+export const typeSenseKeepAlive = new http.Agent({ keepAlive: true, /* keepAliveMsecs: 1000 default */ });
+
+const client = new TypeSense.Client({
   'nodes': [{
     'host': 'localhost',
     'port': 8108,
-    'protocol': 'http'
+    'protocol': 'http',
   }],
   'apiKey': process.env.TYPESENSE_ADMIN_API_KEY,
-  'cacheSearchResultsForSeconds': 5
+  'cacheSearchResultsForSeconds': 5,
+  'httpAgent': typeSenseKeepAlive
 });
 
 //TODO: change the id to _id

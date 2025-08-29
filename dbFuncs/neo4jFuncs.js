@@ -1,4 +1,4 @@
-import 'dotenv/config.js'
+import 'dotenv/config.js';
 import neo4j from 'neo4j-driver';
 import { OGM } from '@neo4j/graphql-ogm';
 
@@ -11,8 +11,8 @@ const typeDefs = `
 `;
 
 //Establish Neo4j connection
-export const driver = neo4j.driver(process.env.NEO4J_URI, neo4j.auth.basic(process.env.NEO4J_USERNAME, process.env.NEO4J_PASSWORD), /*{maxConnectionPoolSize: 100,connectionTimeout: 30000}*/);
-export const ogm = new OGM({ typeDefs, driver });
+export const neo4jDriver = neo4j.driver(process.env.NEO4J_URI, neo4j.auth.basic(process.env.NEO4J_USERNAME, process.env.NEO4J_PASSWORD), {maxConnectionPoolSize: 100,connectionTimeout: 30000});
+export const ogm = new OGM({ typeDefs, neo4jDriver });
 await ogm.init();
 
 /**
@@ -23,12 +23,15 @@ await ogm.init();
  * @returns {Promise<object[]>} Query result
  */
 export async function neo4jQuery(queryStr, params = {}, name="default") {
-  const session = driver.session();
+  const session = neo4jDriver.session();
   try {
     const result = await session.run(queryStr, params);
     return result.records;
   } catch(err) {
     console.error("Neo4j Error on the query " + name + ":", err);
+    return [];
+  } finally {
+    await session.close();
   }
 }
 

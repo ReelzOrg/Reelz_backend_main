@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 
-import { loginUser, registerUser } from '../controllers/auth.js';
+import { loginUser, registerUser, registerUserGoogle, registerUserFacebook, setUsername } from '../controllers/auth.js';
 import { getS3SignedUrl } from '../controllers/uploadToS3.js';
 
 // /api/auth
@@ -12,10 +12,13 @@ const upload = multer({ storage: storage });
 
 router.post("/login", loginUser);
 router.post("/register", upload.single('imgUrl'), registerUser);
+router.post("/register/setusername", setUsername)
 router.get("/register/upload-profile-photo", async (req, res) => {
   await getS3SignedUrl(res, `userDP/${req.body.fileName}`, req.body.fileType)
-})
+});
 
+router.get("/google/callback", registerUserGoogle);
+router.get("/facebook/callback", registerUserFacebook);
 router.get("/register", (req, res) => {
   res.render("register");
 })

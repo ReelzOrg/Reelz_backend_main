@@ -28,9 +28,6 @@ jobs:
           cache: npm
           cache-dependency-path: Reelz_server/package-lock.json
 
-      - name: Use working directory
-        run: echo "Using working directory: Reelz_server"
-
       - name: Install dependencies
         working-directory: Reelz_server
         run: npm ci

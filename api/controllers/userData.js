@@ -3,6 +3,7 @@ import { query } from "../../dbFuncs/pgFuncs.js";
 import { KafkaProducerManager } from "../../utils/kafka/kafkaUtils.js";
 import { v4 as uuidv4 } from 'uuid';
 import { ProducerNames } from "../../utils/kafka/types.js";
+import { Kafka } from "@confluentinc/kafka-javascript/types/kafkajs.js";
 
 /** Time decayed weight calculation for the closeness of 2 users
  * MATCH (u1:User)-[follow:FOLLOWS]->(u2:User)
@@ -513,17 +514,44 @@ export async function sendProcessingRequest(req, res) {
    * post_id: uuid
    */
   const { toProcessUrls, uploadType, post_id } = req.body;
-  const addDataToQueue = {toProcessUrls, uploadType, post_id, timeStamp: Date.now()};
+  const addDataToQueue = {
+    value: {
+      toProcessUrls, uploadType, post_id, timeStamp: Date.now()
+    },
+    headers: {
+      'x-request-id': req.id || 'no-request-id',
+      'x-service': 'media-processor',
+      'x-upload-type': uploadType
+    }
+  };
+  const DLQ_TOPIC = `${ProducerNames.MEDIA.topic}-dlq`; // DLQ topic for failed messages
 
-  //for now I have defined the topics and producer names in the types.js file but in production I should be creating
+  //TODO: for now I have defined the topics and producer names in the types.js file but in production I should be creating
   //a shared config file which contains the topic names which will be used by both the producer (this code) and the 
   //consumer (C++ and python services)
   try {
-    KafkaProducerManager.send(ProducerNames.MEDIA, addDataToQueue);
+    // const result = await KafkaProducerManager.sendBatch(ProducerNames.MEDIA.topic, [addDataToQueue], DLQ_TOPIC);
+    const result = await KafkaProducerManager.sendBatchAvro(
+      {
+        name: ProducerNames.MEDIA.name,
+        topic: ProducerNames.MEDIA.topic,
+        schema: ProducerNames.MEDIA.schema,
+      },
+      [addDataToQueue],
+      DLQ_TOPIC
+    )
+    if(!result) {
+      console.warn('Message was sent to DLQ', { topic: ProducerNames.MEDIA.topic, post_id });
+      return res.status(202).json({ 
+        success: true, 
+        enqueued: true, 
+        warning: 'Message queued but with degraded reliability' 
+      });
+    }
     console.log('Processing request sent successfully -', ProducerNames.MEDIA.topic);
-    res.status(202).json({ enqueued: true });
+    res.status(202).json({ success: true, enqueued: true });
   } catch (error) {
     console.error('Error sending processing request:', error);
-    res.status(500).json({ enqueued: false });
+    res.status(500).json({ success: false, enqueued: false });
   }
 }

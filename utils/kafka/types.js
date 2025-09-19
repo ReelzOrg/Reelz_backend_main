@@ -1,4 +1,4 @@
-import { mediaProcessingSchema } from "./schemas"
+import { mediaProcessingSchema } from "./schemas.js"
 
 export const ProducerNames = {
   MEDIA: {

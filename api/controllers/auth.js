@@ -93,7 +93,7 @@ export async function registerUser(req, res) {
     //Debezium is configured to create a topic name like so: app_events_${routedByValue} so
     //the topic name in kafka would be app_events_UserCreated which should match the topic
     //the consumer subscribes to
-    const outboxPayload = { userId: savedUser.rows[0]._id, eventType: "UserCreated" };
+    const outboxPayload = { userId: savedUser.rows[0]._id, eventType: "UserCreated", username: req.body.username, first_name: req.body.first_name, last_name: req.body.last_name };
     await client.query(outboxQuery, [outboxPayload.eventType, outboxPayload]);
   })
 
@@ -109,10 +109,9 @@ export async function registerUser(req, res) {
     console.log("user have been saved!");
     const userData = {_id: savedUser.rows[0]._id}
     const token = jwt.sign({ userId: savedUser.rows[0]._id }, process.env.JWT_SECRET)
-    res.json({ success: true, token: token, user: userData })
-  } else {
-    res.json({ success: false, message: "The user was not saved to the database" })
+    return res.json({ success: true, token: token, user: userData })
   }
+  return res.json({ success: false, message: "The user was not saved to the database" })
 }
 
 const client_id = process.env.GOOGLE_OAUTH_WEB_CLIENT_ID;

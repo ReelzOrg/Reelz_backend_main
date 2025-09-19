@@ -32,7 +32,7 @@ export async function query(queryStr, params, name="default") {
 export async function closePool() {
   try {
     await pool.end();
-    console.log("PostgreSQL connection pool closed.");
+    console.success("PostgreSQL connection pool closed.");
   } catch (error) {
     console.error("Error closing pool:", error);
   }

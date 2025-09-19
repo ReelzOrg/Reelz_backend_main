@@ -26,14 +26,12 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-          cache-dependency-path: Reelz_server/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        working-directory: Reelz_server
         run: npm ci
 
       - name: Run tests (CI)
-        working-directory: Reelz_server
         env:
           CI: true
         run: npm run test:ci

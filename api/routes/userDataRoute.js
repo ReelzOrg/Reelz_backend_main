@@ -2,9 +2,7 @@ import express from 'express';
 import multer from 'multer';
 
 import { editProfile, getNetworkList, getUserBasicData, getUserFeed, getUserPosts, getUserProfile, handleFollow, handlePostUpload, handleUnFollow, saveViewedPosts, sendProcessingRequest } from '../controllers/userData.js';
-// import { authenticateToken, checkUserAuthorization } from "../../utils/index.js"
-import authenticateToken from "../../utils/authenticateToken.js";
-import checkUserAuthorization from "../../utils/checkUserAuthorization.js";
+import { authenticateToken, checkUserAuthorization } from "../../middleware/index.js";
 import { query } from "../../dbFuncs/pgFuncs.js";
 import { getS3SignedUrl, getMultipleSignedUrls } from "../controllers/uploadToS3.js";
 // import handleFileUpload from '../../utils/handleFileUpload.js';

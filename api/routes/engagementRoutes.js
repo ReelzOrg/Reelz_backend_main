@@ -1,6 +1,6 @@
 import express from 'express';
 
-import authenticateToken from '../../utils/authenticateToken.js';
+import { authenticateToken } from '../../middleware/index.js';
 import { commentOnPost, getCommentsOnPost, likeOnPost } from '../controllers/postEngagement.js';
 
 //  api/posts/

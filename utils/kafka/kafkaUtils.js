@@ -193,7 +193,7 @@ export class KafkaProducerManager {
     const shutdowns = Array.from(KafkaProducerManager.producers.values()).map(p => p.disconnect());
     await Promise.all(shutdowns);
     KafkaProducerManager.producers.clear();
-    console.log("[KafkaProducerManager] All producers disconnected.");
+    console.success("[KafkaProducerManager] All producers disconnected.");
   }
 }
 

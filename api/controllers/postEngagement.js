@@ -1,4 +1,4 @@
-import { transactionQuery,query } from "../../dbFuncs/pgFuncs";
+import { transactionQuery, query } from "../../dbFuncs/pgFuncs.js";
 
 export async function likeOnPost(req, res) {
   const loggedInUserId = req.user.userId;
@@ -56,7 +56,68 @@ export async function commentOnPost(req, res) {
 export async function getCommentsOnPost(req, res) {
   const postId = req.params.id;
 
-  const getCommentsQuery = `SELECT * FROM comments WHERE post_id = $1;`;
+  //still fetches all the comments, just in a proper format
+  const getCommentsQuery = `
+  SELECT
+  c._id,
+  c.comment_text,
+  c.user_id,
+  c.post_id,
+  c.parent_comment_id,
+  COALESCE(
+    json_agg(
+      json_build_object(
+        '_id', r._id,
+        'comment_text', r.comment_text,
+        'user_id', r.user_id,
+        'post_id', r.post_id,
+        'parent_comment_id', r.parent_comment_id
+      )
+    ) FILTER (WHERE r._id IS NOT NULL),
+    '[]'
+  ) AS child_comments
+  FROM comments c
+  LEFT JOIN comments r ON r.post_id = c.post_id AND r.parent_comment_id IS NOT NULL
+  WHERE c.post_id = $1 AND c.parent_comment_id IS NULL
+  GROUP BY c._id, c.comment_text, c.user_id, c.post_id, c.parent_comment_id;
+  `
+
+  //fetches only the latest 10 top-level comments and latest 5 children of each of them
+  //how about removing the ORDER BY clause? It will return random 10 comments and random 5 children of each of them
+  //this could help in visibility of each comment
+  const getCommentsQuery2 = `
+  SELECT c._id, c.comment_text, c.user_id, c.post_id, c.parent_comment_id,
+  COALESCE(
+    json_agg(
+      json_build_object(
+        '_id', r._id,
+        'comment_text', r.comment_text,
+        'user_id', r.user_id,
+        'post_id', r.post_id,
+        'parent_comment_id', r.parent_comment_id
+      )
+    ),
+    '[]'
+  ) AS child_comments
+  FROM
+    (
+      SELECT *
+      FROM comments
+      WHERE post_id = $1 AND parent_comment_id IS NULL
+      ORDER BY created_at DESC
+      LIMIT 10 OFFSET $2
+    ) c
+  LEFT JOIN LATERAL
+    (
+      SELECT *
+      FROM comments r
+      WHERE r.post_id = c.post_id AND r.parent_comment_id = c._id
+      ORDER BY r.created_at DESC
+      LIMIT 5 OFFSET $3
+    ) r ON true
+  GROUP BY c._id, c.comment_text, c.user_id, c.post_id, c.parent_comment_id;
+  `;
+
   const comments = await query(getCommentsQuery, [postId], "getCommentsOnPost");
 
   return res.json({success: true, comments: comments})

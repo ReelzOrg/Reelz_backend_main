@@ -8,6 +8,7 @@ import { createUserWithDriver } from '../../dbFuncs/neo4jFuncs.js';
 import { query, transactionQuery } from '../../dbFuncs/pgFuncs.js';
 import { verifyEmail } from '../../utils.js';
 import { syncTypeSense } from '../../dbFuncs/typesenseFuncs.js';
+import logger from '../../utils/logger.js';
 
 export async function loginUser(req, res) {
   const { email, password } = req.body;
@@ -25,12 +26,12 @@ export async function loginUser(req, res) {
   if(user) {
     bcrypt.compare(password, user[0].password_hash, (err, result) => {
       if(err) {
-        console.log("Error during password comparison:", err);
+        logger.info("Error during password comparison:", err);
         res.json({ success: false, message: "Error comparing passwords" })
         // res.render('login', { msgType: "Error", message: err})
       } else if(result) {
         const userData = {_id: user[0]._id}
-        console.log('Passwords match! User authenticated.', result);
+        logger.info('Passwords match! User authenticated.', result);
         const token = jwt.sign({ userId: user[0]._id }, process.env.JWT_SECRET);
         // const authHeader = new Headers();
         // authHeader.append('Authorization', `Bearer ${token}`)
@@ -40,12 +41,12 @@ export async function loginUser(req, res) {
         res.json({ success: true, token: token, user: userData })
         // res.redirect('/blogs/create');
       } else {  
-        console.log("Passwords don't match");
+        logger.info("Passwords don't match");
         res.status(500).json({ success: false, message: 'Invalid credentials'})
       }
     })
   } else {
-    console.log(`No user with email ${email} exists`)
+    logger.info(`No user with email ${email} exists`);
     res.json({ success: false, message: `No user with email ${email} exist` })
   }
 }
@@ -58,11 +59,11 @@ async function checkExistingUser(email, username="") {
   }
 
   if(existingUserName.length) {
-    console.log("A user with this username already exists");
+    logger.info("A user with this username already exists");
     return res.json({ success: false, message: "A user with this username already exists, please login" })
   }
   if(existingUser.length) {
-    console.log("A user with this email already exists");
+    logger.info("A user with this email already exists");
     return res.json({ success: false, message: "A user with this email already exists, Please login!" })
   }
 }
@@ -77,6 +78,7 @@ export async function registerUser(req, res) {
   //hash the password here
   const salt = await bcrypt.genSalt(10);
   const password_hash = await bcrypt.hash(req.body.password, salt);
+  let userData;
 
   transactionQuery(async (client) => {
     //save the user to the "users" table
@@ -86,7 +88,8 @@ export async function registerUser(req, res) {
     RETURNING *;`
     const values = [req.body.username, req.body.email, password_hash, req.body.first_name, req.body.last_name, req.body.imgUrl];
     const savedUser = await client.query(insertQuery, values);
-    console.log(savedUser);
+    logger.info("User saved successfully: ", savedUser);
+    userData = {_id: savedUser.rows[0]._id};
 
     //Write to the outbox table
     const outboxQuery = `INSERT INTO outbox (event_type, payload) VALUES ($1, $2);`
@@ -105,10 +108,8 @@ export async function registerUser(req, res) {
   // await syncTypeSense(true, savedUser.rows[0]._id);
   //---------------------------------------------------------------------------------------------------
 
-  if(savedUser) {
-    console.log("user have been saved!");
-    const userData = {_id: savedUser.rows[0]._id}
-    const token = jwt.sign({ userId: savedUser.rows[0]._id }, process.env.JWT_SECRET)
+  if(userData) {
+    const token = jwt.sign({ userId: userData._id }, process.env.JWT_SECRET)
     return res.json({ success: true, token: token, user: userData })
   }
   return res.json({ success: false, message: "The user was not saved to the database" })

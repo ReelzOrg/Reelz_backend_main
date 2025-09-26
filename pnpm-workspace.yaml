@@ -1,0 +1,5 @@
+onlyBuiltDependencies:
+  - '@confluentinc/kafka-javascript'
+  - grpc-tools
+  - protobufjs
+  - unrs-resolver
